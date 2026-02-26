@@ -32,3 +32,4 @@ kubeadmConfigPatches:
     nodeRegistration:
       kubeletExtraArgs:
         v: "3"
+        service-account-max-token-expiration: "168h"
