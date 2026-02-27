@@ -16,6 +16,7 @@ nodes:
       extraArgs:
         enable-aggregator-routing: "true"
         v: "3"
+        service-account-max-token-expiration: "168h"
   - |
     kind: InitConfiguration
     nodeRegistration:
@@ -32,4 +33,3 @@ kubeadmConfigPatches:
     nodeRegistration:
       kubeletExtraArgs:
         v: "3"
-        service-account-max-token-expiration: "168h"
