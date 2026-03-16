@@ -269,6 +269,38 @@ const (
 	// issue: https://github.com/kubernetes-sigs/kueue/issues/9156
 	// Enables pod labeling with corresponding cluster and local queue names
 	AssignQueueLabelsForPods featuregate.Feature = "AssignQueueLabelsForPods"
+
+	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/2724-topology-aware-scheduling
+	//
+	// Enable multi-layer topology constraints for TAS, allowing up to 3 slice
+	// layers (in addition to the podset-level constraint) for fine-grained
+	// placement across deep topology hierarchies.
+	TASMultiLayerTopology featuregate.Feature = "TASMultiLayerTopology"
+
+	// owner: @sohankunkerkar
+	//
+	// issue: https://github.com/kubernetes-sigs/kueue/issues/9694
+	// Skip equivalent inadmissible workloads in BestEffortFIFO scheduling.
+	SchedulingEquivalenceHashing featuregate.Feature = "SchedulingEquivalenceHashing"
+
+	// owner: @mbobrovskyi
+	//
+	// issue: https://github.com/kubernetes-sigs/kueue/issues/9799
+	// Use 10s interval for scheduler requeuing.
+	SchedulerLongRequeueInterval featuregate.Feature = "SchedulerLongRequeueInterval"
+
+	// owner: @mbobrovskyi
+	//
+	// issue: https://github.com/kubernetes-sigs/kueue/issues/9799
+	// Use a 5min buffer so that workloads with scheduling timestamps within this
+	// buffer do not preempt each other based on LowerOrNewerEqualPriority.
+	SchedulerTimestampPreemptionBuffer featuregate.Feature = "SchedulerTimestampPreemptionBuffer"
+
+	// owner: @IrvingMg
+	// kep: https://github.com/kubernetes-sigs/kueue/tree/main/keps/7066-custom-metric-labels
+	//
+	// Enable custom metadata labels on Kueue metrics
+	CustomMetricLabels featuregate.Feature = "CustomMetricLabels"
 )
 
 func init() {
@@ -334,6 +366,7 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 	},
 	HierarchicalCohorts: {
 		{Version: version.MustParse("0.11"), Default: true, PreRelease: featuregate.Beta},
+		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 0.19
 	},
 	AdmissionFairSharing: {
 		{Version: version.MustParse("0.12"), Default: false, PreRelease: featuregate.Alpha},
@@ -421,6 +454,21 @@ var defaultVersionedFeatureGates = map[featuregate.Feature]featuregate.Versioned
 	},
 	AssignQueueLabelsForPods: {
 		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.Beta},
+	},
+	TASMultiLayerTopology: {
+		{Version: version.MustParse("0.17"), Default: false, PreRelease: featuregate.Alpha},
+	},
+	SchedulingEquivalenceHashing: {
+		{Version: version.MustParse("0.17"), Default: true, PreRelease: featuregate.Beta},
+	},
+	SchedulerLongRequeueInterval: {
+		{Version: version.MustParse("0.17"), Default: false, PreRelease: featuregate.Alpha}, // remove in 0.20
+	},
+	SchedulerTimestampPreemptionBuffer: {
+		{Version: version.MustParse("0.17"), Default: false, PreRelease: featuregate.Alpha}, // remove in 0.20
+	},
+	CustomMetricLabels: {
+		{Version: version.MustParse("0.17"), Default: false, PreRelease: featuregate.Alpha},
 	},
 }
 

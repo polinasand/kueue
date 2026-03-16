@@ -18,6 +18,8 @@ package workload
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -48,6 +50,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/resources"
 	"sigs.k8s.io/kueue/pkg/util/api"
 	clientutil "sigs.k8s.io/kueue/pkg/util/client"
+	utilpod "sigs.k8s.io/kueue/pkg/util/pod"
 	"sigs.k8s.io/kueue/pkg/util/podset"
 	"sigs.k8s.io/kueue/pkg/util/priority"
 	utilptr "sigs.k8s.io/kueue/pkg/util/ptr"
@@ -64,6 +67,9 @@ const (
 	StatusQuotaReserved = "quotaReserved"
 	StatusAdmitted      = "admitted"
 	StatusFinished      = "finished"
+
+	// SchedulingHashUnknown indicates the scheduling hash could not be computed.
+	SchedulingHashUnknown = "unknown"
 )
 
 var (
@@ -199,6 +205,16 @@ type Info struct {
 
 	// SecondPassIteration indicates the current iteration of the second pass scheduling.
 	SecondPassIteration int
+
+	// LastEvaluatedGeneration stores the Obj.Generation at the time the scheduler
+	// popped this workload for evaluation. Used by PushOrUpdate to detect spec
+	// changes masked by RequeueWorkload's info.Update.
+	LastEvaluatedGeneration int64
+
+	// SchedulingHash identifies the workload's scheduling equivalence class.
+	// Workloads with the same hash have identical scheduling-relevant shape
+	// and will receive the same FlavorAssigner result given the same cluster state.
+	SchedulingHash string
 }
 
 type PodSetResources struct {
@@ -275,8 +291,55 @@ func NewInfo(w *kueue.Workload, opts ...InfoOption) *Info {
 	return info
 }
 
-func (i *Info) Update(wl *kueue.Workload) {
+// UpdateSchedulingHash computes and sets the scheduling hash using the
+// provided contextual logger. Call this after NewInfo in production code.
+func (i *Info) UpdateSchedulingHash(log logr.Logger) {
+	i.SchedulingHash = computeSchedulingHash(log, i.Obj, i.TotalRequests)
+}
+
+// Update refreshes the object reference and recomputes the scheduling hash
+// to reflect any changes (e.g., priority updates).
+func (i *Info) Update(log logr.Logger, wl *kueue.Workload) {
+	log.V(5).Info("Workload info updated", "workload", klog.KObj(wl))
 	i.Obj = wl
+	i.UpdateSchedulingHash(log)
+}
+
+// computeSchedulingHash returns a deterministic hash of the workload's
+// scheduling-relevant shape: workload priority, pod spec (via SpecShape),
+// effective count, minCount, and topologyRequest per PodSet.
+func computeSchedulingHash(log logr.Logger, wl *kueue.Workload, totalRequests []PodSetResources) string {
+	if !features.Enabled(features.SchedulingEquivalenceHashing) {
+		return SchedulingHashUnknown
+	}
+	podSetShapes := make([]map[string]any, 0, len(wl.Spec.PodSets))
+	for i, ps := range wl.Spec.PodSets {
+		effectiveCount := ps.Count
+		if i < len(totalRequests) {
+			effectiveCount = totalRequests[i].Count
+		}
+		podSetShapes = append(podSetShapes, map[string]any{
+			"name":            ps.Name,
+			"spec":            utilpod.SpecShape(&ps.Template.Spec),
+			"count":           effectiveCount,
+			"minCount":        ps.MinCount,
+			"topologyRequest": ps.TopologyRequest,
+		})
+	}
+	shape := map[string]any{
+		"podSets":  podSetShapes,
+		"priority": wl.Spec.Priority,
+	}
+	shapeJSON, err := json.Marshal(shape)
+	if err != nil {
+		log.Error(err, "Failed to compute scheduling hash", "workload", klog.KObj(wl))
+		return SchedulingHashUnknown
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256(shapeJSON))[:16]
+	if logV := log.V(5); logV.Enabled() {
+		logV.Info("Computed scheduling hash", "workload", klog.KObj(wl), "hash", hash, "shapeJSON", string(shapeJSON))
+	}
+	return hash
 }
 
 func (i *Info) CanBePartiallyAdmitted() bool {
@@ -1417,7 +1480,7 @@ func EvictWithRetryOnConflictForPatch() EvictOption {
 	}
 }
 
-func Evict(ctx context.Context, c client.Client, recorder record.EventRecorder, wl *kueue.Workload, reason, msg string, underlyingCause kueue.EvictionUnderlyingCause, clock clock.Clock, tracker *roletracker.RoleTracker, options ...EvictOption) error {
+func Evict(ctx context.Context, c client.Client, recorder record.EventRecorder, wl *kueue.Workload, reason, msg string, underlyingCause kueue.EvictionUnderlyingCause, clock clock.Clock, tracker *roletracker.RoleTracker, cl *metrics.CustomLabels, options ...EvictOption) error {
 	opts := DefaultEvictOptions()
 	for _, opt := range options {
 		opt(opts)
@@ -1461,14 +1524,14 @@ func Evict(ctx context.Context, c client.Client, recorder record.EventRecorder, 
 		log.V(3).Info("WARNING: unexpected eviction of workload without status.Admission", "workload", klog.KObj(wl))
 		return nil
 	}
-	reportEvictedWorkload(recorder, wl, wl.Status.Admission.ClusterQueue, reason, msg, underlyingCause, tracker)
+	reportEvictedWorkload(recorder, wl, wl.Status.Admission.ClusterQueue, reason, msg, underlyingCause, tracker, cl)
 	if reportWorkloadEvictedOnce {
-		metrics.ReportEvictedWorkloadsOnce(wl.Status.Admission.ClusterQueue, reason, string(underlyingCause), PriorityClassName(wl), tracker)
+		metrics.ReportEvictedWorkloadsOnce(wl.Status.Admission.ClusterQueue, reason, string(underlyingCause), PriorityClassName(wl), cl.CQGet(wl.Status.Admission.ClusterQueue), tracker)
 	}
 	return nil
 }
 
-func Finish(ctx context.Context, c client.Client, wl *kueue.Workload, reason, msg string, clock clock.Clock, tracker *roletracker.RoleTracker) error {
+func Finish(ctx context.Context, c client.Client, wl *kueue.Workload, reason, msg string, clock clock.Clock, tracker *roletracker.RoleTracker, cl *metrics.CustomLabels) error {
 	if IsFinished(wl) {
 		return nil
 	}
@@ -1479,9 +1542,11 @@ func Finish(ctx context.Context, c client.Client, wl *kueue.Workload, reason, ms
 		return err
 	}
 	priorityClassName := PriorityClassName(wl)
-	metrics.IncrementFinishedWorkloadTotal(ptr.Deref(wl.Status.Admission, kueue.Admission{}).ClusterQueue, priorityClassName, tracker)
+	cqName := ptr.Deref(wl.Status.Admission, kueue.Admission{}).ClusterQueue
+	metrics.IncrementFinishedWorkloadTotal(cqName, priorityClassName, cl.CQGet(cqName), tracker)
 	if features.Enabled(features.LocalQueueMetrics) {
-		metrics.IncrementLocalQueueFinishedWorkloadTotal(metrics.LQRefFromWorkload(wl), priorityClassName, tracker)
+		lqRef := metrics.LQRefFromWorkload(wl)
+		metrics.IncrementLocalQueueFinishedWorkloadTotal(lqRef, priorityClassName, cl.LQGet(utilqueue.KeyFromWorkload(wl)), tracker)
 	}
 	return nil
 }
@@ -1525,18 +1590,21 @@ func resetUnhealthyNodes(w *kueue.Workload) {
 	w.Status.UnhealthyNodes = nil
 }
 
-func reportEvictedWorkload(recorder record.EventRecorder, wl *kueue.Workload, cqName kueue.ClusterQueueReference, reason, message string, underlyingCause kueue.EvictionUnderlyingCause, tracker *roletracker.RoleTracker) {
+func reportEvictedWorkload(recorder record.EventRecorder, wl *kueue.Workload, cqName kueue.ClusterQueueReference, reason, message string, underlyingCause kueue.EvictionUnderlyingCause, tracker *roletracker.RoleTracker, cl *metrics.CustomLabels) {
 	priorityClassName := PriorityClassName(wl)
-	metrics.ReportEvictedWorkloads(cqName, reason, string(underlyingCause), priorityClassName, tracker)
+	cqCustomLabels := cl.CQGet(cqName)
+	metrics.ReportEvictedWorkloads(cqName, reason, string(underlyingCause), priorityClassName, cqCustomLabels, tracker)
 	if podsReadyToEvictionTime := workloadsWithPodsReadyToEvictedTime(wl); podsReadyToEvictionTime != nil {
-		metrics.PodsReadyToEvictedTimeSeconds.WithLabelValues(string(cqName), reason, string(underlyingCause), roletracker.GetRole(tracker)).Observe(podsReadyToEvictionTime.Seconds())
+		metrics.ReportPodsReadyToEvictedTimeSeconds(cqName, reason, string(underlyingCause), *podsReadyToEvictionTime, cqCustomLabels, tracker)
 	}
 	if features.Enabled(features.LocalQueueMetrics) {
+		lqRef := metrics.LQRefFromWorkload(wl)
 		metrics.ReportLocalQueueEvictedWorkloads(
-			metrics.LQRefFromWorkload(wl),
+			lqRef,
 			reason,
 			string(underlyingCause),
 			priorityClassName,
+			cl.LQGet(utilqueue.KeyFromWorkload(wl)),
 			tracker,
 		)
 	}
@@ -1547,8 +1615,8 @@ func reportEvictedWorkload(recorder record.EventRecorder, wl *kueue.Workload, cq
 	recorder.Event(wl, corev1.EventTypeNormal, eventReason, message)
 }
 
-func ReportPreemption(preemptingCqName kueue.ClusterQueueReference, preemptingReason string, targetCqName kueue.ClusterQueueReference, tracker *roletracker.RoleTracker) {
-	metrics.ReportPreemption(preemptingCqName, preemptingReason, targetCqName, tracker)
+func ReportPreemption(preemptingCqName kueue.ClusterQueueReference, preemptingReason string, targetCqName kueue.ClusterQueueReference, tracker *roletracker.RoleTracker, cl *metrics.CustomLabels) {
+	metrics.ReportPreemption(preemptingCqName, preemptingReason, targetCqName, cl.CQGet(preemptingCqName), tracker)
 }
 
 func References(wls []*Info) []klog.ObjectRef {

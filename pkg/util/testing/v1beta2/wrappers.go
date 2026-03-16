@@ -492,6 +492,14 @@ func (p *PodSetWrapper) SliceSizeTopologyRequest(size int32) *PodSetWrapper {
 	return p
 }
 
+func (p *PodSetWrapper) SliceRequiredTopologyConstraints(constraints ...kueue.PodsetSliceRequiredTopologyConstraint) *PodSetWrapper {
+	if p.TopologyRequest == nil {
+		p.TopologyRequest = &kueue.PodSetTopologyRequest{}
+	}
+	p.TopologyRequest.PodsetSliceRequiredTopologyConstraints = constraints
+	return p
+}
+
 func (p *PodSetWrapper) PreferredTopologyRequest(level string) *PodSetWrapper {
 	if p.TopologyRequest == nil {
 		p.TopologyRequest = &kueue.PodSetTopologyRequest{}
@@ -830,6 +838,22 @@ func (c *CohortWrapper) FairWeight(w resource.Quantity) *CohortWrapper {
 	return c
 }
 
+func (c *CohortWrapper) Label(k, v string) *CohortWrapper {
+	if c.Labels == nil {
+		c.Labels = make(map[string]string)
+	}
+	c.Labels[k] = v
+	return c
+}
+
+func (c *CohortWrapper) Annotation(k, v string) *CohortWrapper {
+	if c.Annotations == nil {
+		c.Annotations = make(map[string]string)
+	}
+	c.Annotations[k] = v
+	return c
+}
+
 // ClusterQueueWrapper wraps a ClusterQueue.
 type ClusterQueueWrapper struct{ kueue.ClusterQueue }
 
@@ -987,6 +1011,14 @@ func (c *ClusterQueueWrapper) Label(k, v string) *ClusterQueueWrapper {
 		c.Labels = make(map[string]string)
 	}
 	c.Labels[k] = v
+	return c
+}
+
+func (c *ClusterQueueWrapper) Annotation(k, v string) *ClusterQueueWrapper {
+	if c.Annotations == nil {
+		c.Annotations = make(map[string]string)
+	}
+	c.Annotations[k] = v
 	return c
 }
 

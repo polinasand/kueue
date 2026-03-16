@@ -17,7 +17,6 @@ limitations under the License.
 package tase2e
 
 import (
-	"context"
 	"fmt"
 
 	kftrainer "github.com/kubeflow/trainer/v2/pkg/apis/trainer/v1alpha1"
@@ -116,13 +115,13 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for TrainJob", func() {
 				Obj()
 
 			util.MustCreate(ctx, k8sClient, trainingRuntime)
-			createTrainJobWithRetry(ctx, k8sClient, trainjob)
+			util.MustCreateWithRetry(ctx, k8sClient, trainjob)
 
 			ginkgo.By("TrainJob is unsuspended", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(trainjob), trainjob)).To(gomega.Succeed())
 					g.Expect(trainjob.Spec.Suspend).Should(gomega.Equal(ptr.To(false)))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			pods := &corev1.PodList{}
@@ -130,7 +129,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for TrainJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name))).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("ensure all pods are scheduled", func() {
@@ -140,7 +139,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for TrainJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name), listOpts)).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("verify the assignment of pods are as expected with rank-based ordering", func() {
@@ -188,13 +187,13 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for TrainJob", func() {
 				Obj()
 
 			util.MustCreate(ctx, k8sClient, trainingRuntime)
-			createTrainJobWithRetry(ctx, k8sClient, trainjob)
+			util.MustCreateWithRetry(ctx, k8sClient, trainjob)
 
 			ginkgo.By("TrainJob is unsuspended", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(trainjob), trainjob)).To(gomega.Succeed())
 					g.Expect(trainjob.Spec.Suspend).Should(gomega.Equal(ptr.To(false)))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			pods := &corev1.PodList{}
@@ -202,7 +201,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for TrainJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name))).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("ensure all pods are scheduled", func() {
@@ -212,7 +211,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for TrainJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name), listOpts)).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("verify the assignment of pods are as expected with rank-based ordering", func() {
@@ -259,13 +258,13 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for TrainJob", func() {
 				Obj()
 
 			util.MustCreate(ctx, k8sClient, trainingRuntime)
-			createTrainJobWithRetry(ctx, k8sClient, trainjob)
+			util.MustCreateWithRetry(ctx, k8sClient, trainjob)
 
 			ginkgo.By("TrainJob is unsuspended", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(trainjob), trainjob)).To(gomega.Succeed())
 					g.Expect(trainjob.Spec.Suspend).Should(gomega.Equal(ptr.To(false)))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			pods := &corev1.PodList{}
@@ -273,7 +272,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for TrainJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name))).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("ensure all pods are scheduled", func() {
@@ -283,7 +282,7 @@ var _ = ginkgo.Describe("TopologyAwareScheduling for TrainJob", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.List(ctx, pods, client.InNamespace(ns.Name), listOpts)).To(gomega.Succeed())
 					g.Expect(pods.Items).Should(gomega.HaveLen(numPods))
-				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
 			})
 
 			ginkgo.By("verify the assignment of pods are as expected with rank-based ordering", func() {
@@ -312,12 +311,4 @@ func readRankAssignmentsFromTrainJobPods(pods []corev1.Pod) map[string]string {
 		assignment[key] = pod.Spec.NodeName
 	}
 	return assignment
-}
-
-func createTrainJobWithRetry(ctx context.Context, c client.Client, trainJob *kftrainer.TrainJob) {
-	gomega.Eventually(func(g gomega.Gomega) {
-		err := c.Create(ctx, trainJob)
-		// Ignore transient webhook errors (e.g., TrainingRuntime not yet visible)
-		g.Expect(client.IgnoreAlreadyExists(err)).ToNot(gomega.HaveOccurred())
-	}, util.Timeout, util.Interval).Should(gomega.Succeed())
 }

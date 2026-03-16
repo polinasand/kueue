@@ -53,6 +53,7 @@ import (
 
 var (
 	cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
+	memprofile = flag.String("memprofile", "", "write memory profile to file")
 
 	metricsPort = flag.Int("metricsPort", 0, "metrics serving port")
 
@@ -110,6 +111,24 @@ func run() int {
 		defer func() {
 			log.Info("Stop CPU profile")
 			pprof.StopCPUProfile()
+		}()
+	}
+
+	if *memprofile != "" {
+		defer func() {
+			log.Info("Write memory profile")
+
+			f, err := os.Create(*memprofile)
+			if err != nil {
+				log.Error(err, "Could not create memory profile")
+				return
+			}
+			defer f.Close()
+
+			if err := pprof.WriteHeapProfile(f); err != nil {
+				log.Error(err, "Could not write memory profile")
+				return
+			}
 		}()
 	}
 
@@ -186,7 +205,7 @@ func run() int {
 	cCache := schdcache.New(mgr.GetClient())
 
 	// setup inadmissible workload requeuer
-	requeuer := qcache.NewRequeuer(qcache.RequeueBatchPeriodProd)
+	requeuer := qcache.NewRequeuer()
 	if err := mgr.Add(requeuer); err != nil {
 		log.Error(err, "Unable to add workloadRequeuer to manager")
 		return 1
@@ -200,7 +219,7 @@ func run() int {
 	preemptionExpectations := preemptexpectations.New()
 
 	// Setup core controllers
-	if failedCtrl, err := core.SetupControllers(mgr, queues, cCache, &configapi.Configuration{}, nil, preemptionExpectations); err != nil {
+	if failedCtrl, err := core.SetupControllers(mgr, queues, cCache, &configapi.Configuration{}, nil, preemptionExpectations, nil); err != nil {
 		log.Error(err, "Unable to create core controller", "controller", failedCtrl)
 		return 1
 	}
