@@ -736,7 +736,7 @@ func TestEnsureWorkloadSlices(t *testing.T) {
 						Creation(fiveMinutesAgo).
 						PodSets(*utiltestingapi.MakePodSet(kueue.DefaultPodSetName, 1).Request(corev1.ResourceCPU, "1").Obj()).
 						ReserveQuotaAt(utiltestingapi.MakeAdmission("default").PodSets(utiltestingapi.MakePodSetAssignment(kueue.DefaultPodSetName).Assignment(corev1.ResourceCPU, "default", "1").Obj()).Obj(), now).
-						Evicted().
+						EvictedAt(now).
 						Obj(),
 					utiltestingapi.MakeWorkload(testJobObject.Name+"-2", testJobObject.Namespace).
 						OwnerReference(testJobGVK, testJobObject.Name, string(testJobObject.UID)).
@@ -943,7 +943,7 @@ func TestEnsureWorkloadSlices(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			ctx, _ := utiltesting.ContextWithLog(t)
-			gotWorkload, gotCompatible, gotError := EnsureWorkloadSlices(ctx, tt.args.clnt, fakeClock, tt.args.jobPodSets, tt.args.jobObject, tt.args.jobObjectGVK, nil)
+			gotWorkload, gotCompatible, gotError := EnsureWorkloadSlices(ctx, tt.args.clnt, fakeClock, tt.args.jobPodSets, tt.args.jobObject, tt.args.jobObjectGVK)
 			if (gotError != nil) != tt.want.error {
 				t.Errorf("EnsureWorkloadSlices() error = %v, wantErr %v", gotError, tt.want.error)
 				return

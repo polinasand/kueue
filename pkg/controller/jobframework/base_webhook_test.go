@@ -24,7 +24,6 @@ import (
 	"go.uber.org/mock/gomock"
 	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -44,7 +43,6 @@ import (
 func TestBaseWebhookDefault(t *testing.T) {
 	testcases := map[string]struct {
 		manageJobsWithoutQueueName bool
-		localQueueDefaulting       bool
 		defaultLqExist             bool
 		enableMultiKueue           bool
 		job                        *batchv1.Job
@@ -59,25 +57,22 @@ func TestBaseWebhookDefault(t *testing.T) {
 			job:                        utiljob.MakeJob("job", metav1.NamespaceDefault).Queue("queue").Obj(),
 			want:                       utiljob.MakeJob("job", metav1.NamespaceDefault).Queue("queue").Suspend(true).Obj(),
 		},
-		"LocalQueueDefaulting enabled, default lq is created, job doesn't have queue label": {
-			localQueueDefaulting: true,
-			defaultLqExist:       true,
-			job:                  utiljob.MakeJob("job", metav1.NamespaceDefault).Obj(),
+		"default lq is created, job doesn't have queue label": {
+			defaultLqExist: true,
+			job:            utiljob.MakeJob("job", metav1.NamespaceDefault).Obj(),
 			want: utiljob.MakeJob("job", metav1.NamespaceDefault).
 				Label(constants.QueueLabel, "default").
 				Obj(),
 		},
-		"LocalQueueDefaulting enabled, default lq is created, job has queue label": {
-			localQueueDefaulting: true,
-			defaultLqExist:       true,
-			job:                  utiljob.MakeJob("job", metav1.NamespaceDefault).Queue("queue").Obj(),
-			want:                 utiljob.MakeJob("job", metav1.NamespaceDefault).Queue("queue").Obj(),
+		"default lq is created, job has queue label": {
+			defaultLqExist: true,
+			job:            utiljob.MakeJob("job", metav1.NamespaceDefault).Queue("queue").Obj(),
+			want:           utiljob.MakeJob("job", metav1.NamespaceDefault).Queue("queue").Obj(),
 		},
-		"LocalQueueDefaulting enabled, default lq isn't created, job doesn't have queue label": {
-			localQueueDefaulting: true,
-			defaultLqExist:       false,
-			job:                  utiljob.MakeJob("job", metav1.NamespaceDefault).Obj(),
-			want:                 utiljob.MakeJob("job", metav1.NamespaceDefault).Obj(),
+		"default lq isn't created, job doesn't have queue label": {
+			defaultLqExist: false,
+			job:            utiljob.MakeJob("job", metav1.NamespaceDefault).Obj(),
+			want:           utiljob.MakeJob("job", metav1.NamespaceDefault).Obj(),
 		},
 		"ManagedByDefaulting, targeting multikueue local queue": {
 			job: utiljob.MakeJob("job", metav1.NamespaceDefault).Queue("multikueue").Obj(),
@@ -111,7 +106,6 @@ func TestBaseWebhookDefault(t *testing.T) {
 	for name, tc := range testcases {
 		t.Run(name, func(t *testing.T) {
 			ctx, log := utiltesting.ContextWithLog(t)
-			features.SetFeatureGateDuringTest(t, features.LocalQueueDefaulting, tc.localQueueDefaulting)
 			features.SetFeatureGateDuringTest(t, features.MultiKueue, tc.enableMultiKueue)
 			clientBuilder := utiltesting.NewClientBuilder().
 				WithObjects(
@@ -119,7 +113,7 @@ func TestBaseWebhookDefault(t *testing.T) {
 				)
 			cl := clientBuilder.Build()
 			cqCache := schdcache.New(cl)
-			queueManager := qcache.NewManager(cl, cqCache)
+			queueManager := qcache.NewManagerForUnitTests(cl, cqCache)
 			if tc.defaultLqExist {
 				if err := queueManager.AddLocalQueue(ctx, utiltestingapi.MakeLocalQueue("default", metav1.NamespaceDefault).
 					ClusterQueue("cluster-queue").Obj()); err != nil {
@@ -175,10 +169,10 @@ func TestBaseWebhookDefault(t *testing.T) {
 				Return(features.Enabled(features.MultiKueue) && (tc.job.Spec.ManagedBy == nil || *tc.job.Spec.ManagedBy == batchv1.JobControllerName)).
 				AnyTimes()
 
-			w := &jobframework.BaseWebhook{
+			w := &jobframework.BaseWebhook[*mockJob]{
 				ManageJobsWithoutQueueName: tc.manageJobsWithoutQueueName,
-				FromObject: func(object runtime.Object) jobframework.GenericJob {
-					return object.(*mockJob)
+				FromObject: func(object *mockJob) jobframework.GenericJob {
+					return object
 				},
 				Queues: queueManager,
 				Cache:  cqCache,
@@ -251,9 +245,9 @@ func TestValidateOnCreate(t *testing.T) {
 			job.MockGenericJob.EXPECT().Object().Return(tc.job).AnyTimes()
 			job.MockJobWithCustomValidation.EXPECT().ValidateOnCreate(gomock.Any()).Return(tc.customValidationFailure, tc.customValidationError).AnyTimes()
 
-			w := &jobframework.BaseWebhook{
-				FromObject: func(object runtime.Object) jobframework.GenericJob {
-					return object.(*mockJob)
+			w := &jobframework.BaseWebhook[*mockJob]{
+				FromObject: func(object *mockJob) jobframework.GenericJob {
+					return object
 				},
 			}
 
@@ -339,9 +333,9 @@ func TestValidateOnUpdate(t *testing.T) {
 				return mj
 			}
 
-			w := &jobframework.BaseWebhook{
-				FromObject: func(object runtime.Object) jobframework.GenericJob {
-					return object.(*mockJob)
+			w := &jobframework.BaseWebhook[*mockJob]{
+				FromObject: func(object *mockJob) jobframework.GenericJob {
+					return object
 				},
 			}
 

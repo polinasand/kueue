@@ -17,7 +17,6 @@ limitations under the License.
 package externalframeworks
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -134,7 +133,7 @@ func TestAdapter_IsJobManagedByKueue(t *testing.T) {
 			client := fake.NewClientBuilder().WithObjects(tt.object).Build()
 			key := types.NamespacedName{Name: "test-job", Namespace: "default"}
 
-			got, gotReason, err := adapter.IsJobManagedByKueue(context.Background(), client, key)
+			got, gotReason, err := adapter.IsJobManagedByKueue(t.Context(), client, key)
 
 			if diff := cmp.Diff(tt.wantErr, err, cmpopts.EquateErrors()); diff != "" {
 				t.Errorf("Adapter.IsJobManagedByKueue() error (-want,+got):\n%s", diff)
@@ -284,12 +283,12 @@ func TestAdapter_GetEmptyList(t *testing.T) {
 	}
 }
 
-func TestAdapter_WorkloadKeyFor(t *testing.T) {
+func TestAdapter_WorkloadKeysFor(t *testing.T) {
 	tests := []struct {
 		name       string
 		gvk        schema.GroupVersionKind
 		object     *unstructured.Unstructured
-		want       types.NamespacedName
+		want       []types.NamespacedName
 		wantErrMsg string
 	}{
 		{
@@ -310,10 +309,10 @@ func TestAdapter_WorkloadKeyFor(t *testing.T) {
 					},
 				},
 			},
-			want: types.NamespacedName{
+			want: []types.NamespacedName{{
 				Name:      "test-workload",
 				Namespace: "test-ns",
-			},
+			}},
 		},
 		{
 			name: "object without prebuilt workload label",
@@ -333,7 +332,7 @@ func TestAdapter_WorkloadKeyFor(t *testing.T) {
 					},
 				},
 			},
-			want:       types.NamespacedName{},
+			want:       nil,
 			wantErrMsg: "no prebuilt workload found for TestJob: test-ns/test-job",
 		},
 	}
@@ -345,7 +344,7 @@ func TestAdapter_WorkloadKeyFor(t *testing.T) {
 			tt.object.SetName("test-job")
 			tt.object.SetNamespace("test-ns")
 
-			result, err := adapter.(*Adapter).WorkloadKeyFor(tt.object)
+			result, err := adapter.(*Adapter).WorkloadKeysFor(tt.object)
 
 			if tt.wantErrMsg != "" {
 				if err == nil {
@@ -359,7 +358,7 @@ func TestAdapter_WorkloadKeyFor(t *testing.T) {
 
 			if tt.wantErrMsg == "" {
 				if diff := cmp.Diff(tt.want, result); diff != "" {
-					t.Errorf("Adapter.WorkloadKeyFor() result (-want,+got):\n%s", diff)
+					t.Errorf("Adapter.WorkloadKeysFor() result (-want,+got):\n%s", diff)
 				}
 			}
 		})

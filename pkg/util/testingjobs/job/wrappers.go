@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package testing
+package job
 
 import (
 	"time"
@@ -64,6 +64,11 @@ func MakeJob(name, ns string) *JobWrapper {
 }
 
 // Obj returns the inner Job.
+func (j *JobWrapper) SchedulingGate(name string) *JobWrapper {
+	j.Spec.Template.Spec.SchedulingGates = append(j.Spec.Template.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: name})
+	return j
+}
+
 func (j *JobWrapper) Obj() *batchv1.Job {
 	return &j.Job
 }
@@ -169,6 +174,12 @@ func (j *JobWrapper) NodeSelector(k, v string) *JobWrapper {
 	return j
 }
 
+// PodReplacementPolicy sets the pod replacement policy on the job object.
+func (j *JobWrapper) PodReplacementPolicy(policy *batchv1.PodReplacementPolicy) *JobWrapper {
+	j.Spec.PodReplacementPolicy = policy
+	return j
+}
+
 // PodAnnotation sets annotation at the pod template level
 func (j *JobWrapper) PodAnnotation(k, v string) *JobWrapper {
 	if j.Spec.Template.Annotations == nil {
@@ -184,6 +195,12 @@ func (j *JobWrapper) PodLabel(k, v string) *JobWrapper {
 		j.Spec.Template.Labels = make(map[string]string)
 	}
 	j.Spec.Template.Labels[k] = v
+	return j
+}
+
+// PodAffinity sets the pod affinity at the pod template level
+func (j *JobWrapper) PodAffinity(affinity *corev1.Affinity) *JobWrapper {
+	j.Spec.Template.Spec.Affinity = affinity
 	return j
 }
 
@@ -218,6 +235,12 @@ func (j *JobWrapper) OwnerReference(ownerName string, ownerGVK schema.GroupVersi
 
 func (j *JobWrapper) Containers(containers ...corev1.Container) *JobWrapper {
 	j.Spec.Template.Spec.Containers = containers
+	return j
+}
+
+// InitContainers sets the init containers for the pod template.
+func (j *JobWrapper) InitContainers(containers ...corev1.Container) *JobWrapper {
+	j.Spec.Template.Spec.InitContainers = containers
 	return j
 }
 
