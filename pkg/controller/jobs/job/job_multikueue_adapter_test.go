@@ -83,6 +83,7 @@ func TestMultiKueueAdapter(t *testing.T) {
 				*baseJobBuilder.Clone().
 					Label(constants.PrebuiltWorkloadLabel, "wl1").
 					Label(kueue.MultiKueueOriginLabel, "origin1").
+					PodLabel(kueue.MultiKueueWorkerWorkloadLabel, "true").
 					Obj(),
 			},
 		},
@@ -407,6 +408,7 @@ func Test_multiKueueAdapter_SyncJob(t *testing.T) {
 				localJob: newJob().ManagedBy("parent").Obj(),
 				remoteJob: newJob().Label(kueue.MultiKueueOriginLabel, "").
 					Label(constants.PrebuiltWorkloadLabel, "").
+					PodLabel(kueue.MultiKueueWorkerWorkloadLabel, "true").
 					ManagedBy("parent").
 					Obj(),
 			},
@@ -425,6 +427,7 @@ func Test_multiKueueAdapter_SyncJob(t *testing.T) {
 				localJob: newJob().ManagedBy("parent").Obj(),
 				remoteJob: newJob().Label(kueue.MultiKueueOriginLabel, "").
 					Label(constants.PrebuiltWorkloadLabel, "").
+					PodLabel(kueue.MultiKueueWorkerWorkloadLabel, "true").
 					Obj(),
 			},
 		},
