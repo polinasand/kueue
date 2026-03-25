@@ -117,9 +117,6 @@ func (s *Scraper) Run(ctx context.Context, output string) error {
 		case <-ticker.C:
 			err := s.doScrape(ctx, tw)
 			if err != nil {
-				if errors.Is(ctx.Err(), context.Canceled) {
-					return nil
-				}
 				return err
 			}
 		}

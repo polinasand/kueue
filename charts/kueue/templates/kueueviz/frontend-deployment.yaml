@@ -29,8 +29,6 @@ spec:
       app: kueueviz-frontend
   template:
     metadata:
-      annotations:
-        charts.kueue.x-k8s.io/config-checksum: {{ include (print .Template.BasePath "/kueueviz/frontend-configmap.yaml") . | sha256sum }}
       labels:
         app: kueueviz-frontend
     spec:
@@ -49,14 +47,6 @@ spec:
       tolerations:
       {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- with .Values.kueueViz.frontend.podSecurityContext }}
-      securityContext:
-      {{- toYaml . | nindent 8 }}
-      {{- end }}
-      volumes:
-        - name: env-config
-          configMap:
-            name: '{{ include "kueue.fullname" . }}-kueueviz-frontend-env'
       containers:
         - name: frontend
           {{- with .Values.kueueViz.frontend.env }}
@@ -65,17 +55,13 @@ spec:
           {{- end }}
           image: '{{ .Values.kueueViz.frontend.image.repository }}:{{ .Values.kueueViz.frontend.image.tag | default .Chart.AppVersion }}'
           imagePullPolicy: '{{ .Values.kueueViz.frontend.image.pullPolicy }}'
-          resources:
-            {{- toYaml .Values.kueueViz.frontend.resources | nindent 12 }}
-          {{- with .Values.kueueViz.frontend.containerSecurityContext }}
-          securityContext:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
           ports:
             - containerPort: 8080
-          volumeMounts:
-            - name: env-config
-              mountPath: /app/build/env.js
-              subPath: env.js
-              readOnly: true
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 500m
+              memory: 512Mi
 {{- end }}

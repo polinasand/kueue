@@ -17,7 +17,6 @@ limitations under the License.
 package statefulset
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -36,7 +35,6 @@ import (
 
 	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
-	kueueconstants "sigs.k8s.io/kueue/pkg/constants"
 	"sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
 	"sigs.k8s.io/kueue/pkg/controller/jobs/appwrapper"
@@ -48,12 +46,6 @@ import (
 	testingappwrapper "sigs.k8s.io/kueue/pkg/util/testingjobs/appwrapper"
 	testingleaderworkerset "sigs.k8s.io/kueue/pkg/util/testingjobs/leaderworkerset"
 	testingstatefulset "sigs.k8s.io/kueue/pkg/util/testingjobs/statefulset"
-	"sigs.k8s.io/kueue/pkg/util/webhook"
-	testutil "sigs.k8s.io/kueue/test/util"
-)
-
-var (
-	admissionGatedByAnnotationsPath = field.NewPath("metadata", "annotations").Key(kueueconstants.AdmissionGatedByAnnotation)
 )
 
 func TestDefault(t *testing.T) {
@@ -61,6 +53,7 @@ func TestDefault(t *testing.T) {
 		initObjs                   []client.Object
 		statefulset                *appsv1.StatefulSet
 		manageJobsWithoutQueueName bool
+		localQueueDefaulting       bool
 		defaultLqExist             bool
 		enableIntegrations         []string
 		want                       *appsv1.StatefulSet
@@ -74,7 +67,13 @@ func TestDefault(t *testing.T) {
 				Obj(),
 			want: testingstatefulset.MakeStatefulSet("test-pod", "test-ns").
 				Replicas(10).
+				PodTemplateManagedByKueue().
 				PodTemplateAnnotation(podconstants.SuspendedByParentAnnotation, FrameworkName).
+				PodTemplateSpecPodGroupNameLabel("test-pod", "", gvk).
+				PodTemplateSpecPodGroupTotalCountAnnotation(10).
+				PodTemplateSpecPodGroupFastAdmissionAnnotation().
+				PodTemplateSpecPodGroupServingAnnotation().
+				PodTemplateSpecPodGroupPodIndexLabelAnnotation(appsv1.PodIndexLabel).
 				Obj(),
 		},
 		"statefulset with queue": {
@@ -86,20 +85,14 @@ func TestDefault(t *testing.T) {
 			want: testingstatefulset.MakeStatefulSet("test-pod", "").
 				Replicas(10).
 				Queue("test-queue").
+				PodTemplateSpecQueue("test-queue").
+				PodTemplateManagedByKueue().
 				PodTemplateAnnotation(podconstants.SuspendedByParentAnnotation, FrameworkName).
-				Obj(),
-		},
-		"statefulset managed by another framework": {
-			enableIntegrations: []string{"pod"},
-			statefulset: testingstatefulset.MakeStatefulSet("test-pod", "").
-				Replicas(10).
-				Queue("test-queue").
-				PodTemplateAnnotation(podconstants.SuspendedByParentAnnotation, "test-framework").
-				Obj(),
-			want: testingstatefulset.MakeStatefulSet("test-pod", "").
-				Replicas(10).
-				Queue("test-queue").
-				PodTemplateAnnotation(podconstants.SuspendedByParentAnnotation, "test-framework").
+				PodTemplateSpecPodGroupNameLabel("test-pod", "", gvk).
+				PodTemplateSpecPodGroupTotalCountAnnotation(10).
+				PodTemplateSpecPodGroupFastAdmissionAnnotation().
+				PodTemplateSpecPodGroupServingAnnotation().
+				PodTemplateSpecPodGroupPodIndexLabelAnnotation(appsv1.PodIndexLabel).
 				Obj(),
 		},
 		"statefulset with queue and priority class": {
@@ -113,7 +106,15 @@ func TestDefault(t *testing.T) {
 				Replicas(10).
 				Queue("test-queue").
 				Label(constants.WorkloadPriorityClassLabel, "test").
+				PodTemplateSpecQueue("test-queue").
+				PodTemplateManagedByKueue().
 				PodTemplateAnnotation(podconstants.SuspendedByParentAnnotation, FrameworkName).
+				PodTemplateSpecLabel(constants.WorkloadPriorityClassLabel, "test").
+				PodTemplateSpecPodGroupNameLabel("test-pod", "", gvk).
+				PodTemplateSpecPodGroupTotalCountAnnotation(10).
+				PodTemplateSpecPodGroupFastAdmissionAnnotation().
+				PodTemplateSpecPodGroupServingAnnotation().
+				PodTemplateSpecPodGroupPodIndexLabelAnnotation(appsv1.PodIndexLabel).
 				Obj(),
 		},
 		"statefulset without replicas": {
@@ -123,41 +124,66 @@ func TestDefault(t *testing.T) {
 				Obj(),
 			want: testingstatefulset.MakeStatefulSet("test-pod", "").
 				Queue("test-queue").
+				PodTemplateManagedByKueue().
+				PodTemplateSpecPodGroupNameLabel("test-pod", "", gvk).
+				PodTemplateSpecPodGroupTotalCountAnnotation(1).
+				PodTemplateSpecQueue("test-queue").
 				PodTemplateAnnotation(podconstants.SuspendedByParentAnnotation, FrameworkName).
+				PodTemplateSpecPodGroupFastAdmissionAnnotation().
+				PodTemplateSpecPodGroupServingAnnotation().
+				PodTemplateSpecPodGroupPodIndexLabelAnnotation(appsv1.PodIndexLabel).
 				Obj(),
 		},
-		"default lq is created, job doesn't have queue label": {
-			defaultLqExist: true,
-			statefulset:    testingstatefulset.MakeStatefulSet("test-pod", "default").Obj(),
+		"LocalQueueDefaulting enabled, default lq is created, job doesn't have queue label": {
+			localQueueDefaulting: true,
+			defaultLqExist:       true,
+			statefulset:          testingstatefulset.MakeStatefulSet("test-pod", "default").Obj(),
 			want: testingstatefulset.MakeStatefulSet("test-pod", "default").
 				Queue("default").
+				PodTemplateSpecQueue("default").
+				PodTemplateManagedByKueue().
 				PodTemplateAnnotation(podconstants.SuspendedByParentAnnotation, FrameworkName).
+				PodTemplateSpecPodGroupNameLabel("test-pod", "", gvk).
+				PodTemplateSpecPodGroupTotalCountAnnotation(1).
+				PodTemplateSpecPodGroupFastAdmissionAnnotation().
+				PodTemplateSpecPodGroupServingAnnotation().
+				PodTemplateSpecPodGroupPodIndexLabelAnnotation(appsv1.PodIndexLabel).
 				Obj(),
 		},
-		"default lq is created, job has queue label": {
-			defaultLqExist: true,
-			statefulset:    testingstatefulset.MakeStatefulSet("test-pod", "").Queue("test-queue").Obj(),
+		"LocalQueueDefaulting enabled, default lq is created, job has queue label": {
+			localQueueDefaulting: true,
+			defaultLqExist:       true,
+			statefulset:          testingstatefulset.MakeStatefulSet("test-pod", "").Queue("test-queue").Obj(),
 			want: testingstatefulset.MakeStatefulSet("test-pod", "").
 				Queue("test-queue").
+				PodTemplateSpecQueue("test-queue").
+				PodTemplateManagedByKueue().
 				PodTemplateAnnotation(podconstants.SuspendedByParentAnnotation, FrameworkName).
+				PodTemplateSpecPodGroupNameLabel("test-pod", "", gvk).
+				PodTemplateSpecPodGroupTotalCountAnnotation(1).
+				PodTemplateSpecPodGroupFastAdmissionAnnotation().
+				PodTemplateSpecPodGroupServingAnnotation().
+				PodTemplateSpecPodGroupPodIndexLabelAnnotation(appsv1.PodIndexLabel).
 				Obj(),
 		},
-		"default lq isn't created, job doesn't have queue label": {
-			defaultLqExist: false,
-			statefulset:    testingstatefulset.MakeStatefulSet("test-pod", "").Obj(),
-			want:           testingstatefulset.MakeStatefulSet("test-pod", "").Obj(),
+		"LocalQueueDefaulting enabled, default lq isn't created, job doesn't have queue label": {
+			localQueueDefaulting: true,
+			defaultLqExist:       false,
+			statefulset:          testingstatefulset.MakeStatefulSet("test-pod", "").Obj(),
+			want:                 testingstatefulset.MakeStatefulSet("test-pod", "").Obj(),
 		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGateDuringTest(t, features.LocalQueueDefaulting, tc.localQueueDefaulting)
 			t.Cleanup(jobframework.EnableIntegrationsForTest(t, tc.enableIntegrations...))
 			ctx, _ := utiltesting.ContextWithLog(t)
 
 			builder := utiltesting.NewClientBuilder().WithObjects(tc.initObjs...)
 			cli := builder.Build()
 			cqCache := schdcache.New(cli)
-			queueManager := qcache.NewManagerForUnitTests(cli, cqCache)
+			queueManager := qcache.NewManager(cli, cqCache)
 			if tc.defaultLqExist {
 				if err := queueManager.AddLocalQueue(ctx, utiltestingapi.MakeLocalQueue("default", "default").
 					ClusterQueue("cluster-queue").Obj()); err != nil {
@@ -183,10 +209,9 @@ func TestDefault(t *testing.T) {
 
 func TestValidateCreate(t *testing.T) {
 	testCases := map[string]struct {
-		sts              *appsv1.StatefulSet
-		wantErr          error
-		wantWarns        admission.Warnings
-		admissionGatedBy bool
+		sts       *appsv1.StatefulSet
+		wantErr   error
+		wantWarns admission.Warnings
 	}{
 		"without queue": {
 			sts: testingstatefulset.MakeStatefulSet("test-pod", "").Obj(),
@@ -207,149 +232,10 @@ func TestValidateCreate(t *testing.T) {
 				},
 			}.ToAggregate(),
 		},
-		"statefulset managed by another framework": {
-			sts: testingstatefulset.MakeStatefulSet("test-pod", "").
-				Queue("test/queue").
-				PodTemplateAnnotation(podconstants.SuspendedByParentAnnotation, "test-framework").
-				Obj(),
-		},
-		"AdmissionGatedBy annotation - single gate": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/controller").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: true,
-		},
-		"AdmissionGatedBy annotation - trailing space": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/gate ").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: true,
-		},
-		"AdmissionGatedBy annotation - space before comma": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/gate ,example.com/gate2").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: true,
-		},
-		"AdmissionGatedBy annotation - space after comma": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/gate, example.com/gate2").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: true,
-		},
-		"AdmissionGatedBy annotation - leading space": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, " example.com/gate").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: true,
-		},
-		"AdmissionGatedBy annotation - multiple gates": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/a,not.example.com/b").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: true,
-		},
-		"invalid AdmissionGatedBy annotation - not in subdomain/path format": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "this is an invalid value").
-				Obj(),
-			wantErr: field.ErrorList{
-				field.Invalid(admissionGatedByAnnotationsPath, "this is an invalid value", "must be a domain-prefixed path (such as \"acme.io/foo\")"),
-			}.ToAggregate(),
-			admissionGatedBy: true,
-		},
-		"invalid AdmissionGatedBy annotation - duplicate gates": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "duplicates.are/invalid,duplicates.are/invalid").
-				Obj(),
-			wantErr: field.ErrorList{
-				field.Invalid(admissionGatedByAnnotationsPath, "duplicates.are/invalid,duplicates.are/invalid", "duplicate gate name: duplicates.are/invalid"),
-			}.ToAggregate(),
-			admissionGatedBy: true,
-		},
-		"invalid AdmissionGatedBy annotation - gate name too long": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "cannot.be.too.long/"+strings.Repeat("but-this-is-too-long", 20)).
-				Obj(),
-			wantErr: field.ErrorList{
-				field.TooLong(admissionGatedByAnnotationsPath, "", webhook.MaxGateNameLengthForAdmissionGatedBy),
-			}.ToAggregate(),
-			admissionGatedBy: true,
-		},
-		"invalid AdmissionGatedBy annotation - space in path component": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/gate name").
-				Obj(),
-			wantErr: field.ErrorList{
-				field.Invalid(admissionGatedByAnnotationsPath, "gate name", testutil.InvalidPathMessage),
-			}.ToAggregate(),
-			admissionGatedBy: true,
-		},
-		"invalid AdmissionGatedBy annotation - space in domain component": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example .com/gate").
-				Obj(),
-			wantErr: field.ErrorList{
-				field.Invalid(admissionGatedByAnnotationsPath, "example .com", testutil.InvalidRFC1123Message),
-			}.ToAggregate(),
-			admissionGatedBy: true,
-		},
-		"invalid AdmissionGatedBy annotation - multiple gates with one containing space": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "valid.com/gate,invalid gate.com/controller").
-				Obj(),
-			wantErr: field.ErrorList{
-				field.Invalid(admissionGatedByAnnotationsPath, "invalid gate.com", testutil.InvalidRFC1123Message),
-			}.ToAggregate(),
-			admissionGatedBy: true,
-		},
-		"AdmissionGatedBy annotation with feature gate disabled - valid value": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/gate").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: false,
-		},
-		"AdmissionGatedBy annotation with feature gate disabled - invalid value": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "this is an invalid value").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: false,
-		},
-		"AdmissionGatedBy annotation with feature gate enabled - empty string": {
-			sts: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: true,
-		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			features.SetFeatureGateDuringTest(t, features.AdmissionGatedBy, tc.admissionGatedBy)
 			t.Cleanup(jobframework.EnableIntegrationsForTest(t, "pod"))
 			builder := utiltesting.NewClientBuilder()
 			client := builder.Build()
@@ -368,12 +254,11 @@ func TestValidateCreate(t *testing.T) {
 
 func TestValidateUpdate(t *testing.T) {
 	testCases := map[string]struct {
-		integrations     []string
-		objs             []runtime.Object
-		oldObj           *appsv1.StatefulSet
-		newObj           *appsv1.StatefulSet
-		wantErr          error
-		admissionGatedBy bool
+		integrations []string
+		objs         []runtime.Object
+		oldObj       *appsv1.StatefulSet
+		newObj       *appsv1.StatefulSet
+		wantErr      error
 	}{
 		"no changes": {
 			oldObj: &appsv1.StatefulSet{
@@ -472,15 +357,6 @@ func TestValidateUpdate(t *testing.T) {
 					Field: queueNameLabelPath.String(),
 				},
 			}.ToAggregate(),
-		},
-		"statefulset managed by another framework": {
-			oldObj: testingstatefulset.MakeStatefulSet("test-sts", "test-ns").
-				Queue("test-queue").
-				PodTemplateAnnotation(podconstants.SuspendedByParentAnnotation, "test-framework").
-				Obj(),
-			newObj: testingstatefulset.MakeStatefulSet("test-sts", "test-ns").
-				PodTemplateAnnotation(podconstants.SuspendedByParentAnnotation, "test-framework").
-				Obj(),
 		},
 		"change in priority class label when suspended": {
 			oldObj: &appsv1.StatefulSet{
@@ -906,15 +782,13 @@ func TestValidateUpdate(t *testing.T) {
 		},
 		"scale up from zero blocked by existing workload": {
 			objs: []runtime.Object{
-				utiltestingapi.MakeWorkload(GetWorkloadName("test-uid", "test-statefulset"), "test-ns").Obj(),
+				utiltestingapi.MakeWorkload(GetWorkloadName("test-statefulset"), "test-ns").Obj(),
 			},
 			oldObj: testingstatefulset.MakeStatefulSet("test-statefulset", "test-ns").
-				UID("test-uid").
 				Queue("test-queue").
 				Replicas(0).
 				Obj(),
 			newObj: testingstatefulset.MakeStatefulSet("test-statefulset", "test-ns").
-				UID("test-uid").
 				Queue("test-queue").
 				Replicas(3).
 				Obj(),
@@ -937,84 +811,10 @@ func TestValidateUpdate(t *testing.T) {
 				Replicas(3).
 				Obj(),
 		},
-		"reject adding AdmissionGatedBy annotation after StatefulSet creation": {
-			oldObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Obj(),
-			newObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/controller1").
-				Obj(),
-			wantErr: field.ErrorList{
-				field.Forbidden(admissionGatedByAnnotationsPath, "cannot add admission gate after creation"),
-			}.ToAggregate(),
-			admissionGatedBy: true,
-		},
-		"allow removing AdmissionGatedBy annotation with single gate": {
-			oldObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/controller1").
-				Obj(),
-			newObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: true,
-		},
-		"allow removing AdmissionGatedBy annotation with multiple gates": {
-			oldObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/controller1,example.com/controller2").
-				Obj(),
-			newObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: true,
-		},
-		"allow removing one gate from AdmissionGatedBy annotation": {
-			oldObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/controller1,example.com/controller2").
-				Obj(),
-			newObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/controller2").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: true,
-		},
-		"reject injecting new gate in AdmissionGatedBy annotation": {
-			oldObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/controller1,example.com/controller2").
-				Obj(),
-			newObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/controller3").
-				Obj(),
-			wantErr: field.ErrorList{
-				field.Forbidden(admissionGatedByAnnotationsPath, "can only remove gates, not add new ones"),
-			}.ToAggregate(),
-			admissionGatedBy: true,
-		},
-		"allow reordering gates in AdmissionGatedBy annotation": {
-			oldObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/controller1,example.com/controller2").
-				Obj(),
-			newObj: testingstatefulset.MakeStatefulSet("test-sts", "default").
-				Queue("queue").
-				Annotation(kueueconstants.AdmissionGatedByAnnotation, "example.com/controller2,example.com/controller1").
-				Obj(),
-			wantErr:          nil,
-			admissionGatedBy: true,
-		},
 	}
 
 	for name, tc := range testCases {
 		t.Run(name, func(t *testing.T) {
-			features.SetFeatureGateDuringTest(t, features.AdmissionGatedBy, tc.admissionGatedBy)
 			t.Cleanup(jobframework.EnableIntegrationsForTest(t, tc.integrations...))
 
 			client := utiltesting.NewClientBuilder(awv1beta2.AddToScheme, leaderworkersetv1.AddToScheme).

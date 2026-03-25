@@ -147,17 +147,15 @@ func TestFSWatch(t *testing.T) {
 				}
 			}
 			// Using an empty context here to avoid a race condition with the test context when setting the logger.
-			ctx := ctrl.LoggerInto(t.Context(), utiltesting.NewLogger(t))
+			ctx := context.Background()
+			ctrl.LoggerInto(ctx, utiltesting.NewLogger(t))
 			ctx, cancel := context.WithTimeout(ctx, time.Second)
-			wg := sync.WaitGroup{}
-			defer func() {
-				cancel()
-				wg.Wait()
-			}()
+			defer cancel()
 			watcher := newKubeConfigFSWatcher()
 
-			// start the recorder and the watcher
+			// start the recorder
 			gotEventsForClusters := set.New[string]()
+			wg := sync.WaitGroup{}
 			wg.Go(func() {
 				for {
 					select {
@@ -171,10 +169,7 @@ func TestFSWatch(t *testing.T) {
 					}
 				}
 			})
-			wg.Go(func() {
-				_ = watcher.Start(ctx)
-			})
-			<-watcher.ready
+			_ = watcher.Start(ctx)
 
 			gotAddErrors := map[string]error{}
 			for c, p := range tc.clusters {
@@ -204,13 +199,10 @@ func TestFSWatch(t *testing.T) {
 
 func TestFSWatchAddRm(t *testing.T) {
 	// Using an empty context here to avoid a race condition with the test context when setting the logger.
-	ctx := ctrl.LoggerInto(t.Context(), utiltesting.NewLogger(t))
+	ctx := context.Background()
+	ctrl.LoggerInto(ctx, utiltesting.NewLogger(t))
 	ctx, cancel := context.WithCancel(ctx)
-	wg := sync.WaitGroup{}
-	defer func() {
-		cancel()
-		wg.Wait()
-	}()
+	defer cancel()
 	basePath := t.TempDir()
 	f1Path := filepath.Join(basePath, "file.one")
 	f2Path := filepath.Join(basePath, "file.two")
@@ -235,11 +227,7 @@ func TestFSWatchAddRm(t *testing.T) {
 		{
 			name: "start",
 			opFnc: func(kcf *KubeConfigFSWatcher) error {
-				wg.Go(func() {
-					_ = kcf.Start(ctx)
-				})
-				<-kcf.ready
-				return nil
+				return kcf.Start(ctx)
 			},
 			wantClustersToFile: map[string]string{},
 			wantFileToClusters: map[string]set.Set[string]{},

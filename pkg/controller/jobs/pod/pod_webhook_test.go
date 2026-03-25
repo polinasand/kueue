@@ -89,6 +89,7 @@ func TestDefault(t *testing.T) {
 		features                     map[featuregate.Feature]bool
 		initObjects                  []client.Object
 		pod                          *corev1.Pod
+		localQueueDefaulting         bool
 		defaultLqExist               bool
 		manageJobsWithoutQueueName   bool
 		managedJobsNamespaceSelector labels.Selector
@@ -428,11 +429,12 @@ func TestDefault(t *testing.T) {
 				TopologySchedulingGate().
 				Obj(),
 		},
-		"default queue is created, pod has no queue label": {
-			initObjects:       []client.Object{defaultNamespace},
-			defaultLqExist:    true,
-			podSelector:       &metav1.LabelSelector{},
-			namespaceSelector: defaultNamespaceSelector,
+		"LocalQueueDefaulting enabled, default queue is created, pod has no queue label": {
+			initObjects:          []client.Object{defaultNamespace},
+			localQueueDefaulting: true,
+			defaultLqExist:       true,
+			podSelector:          &metav1.LabelSelector{},
+			namespaceSelector:    defaultNamespaceSelector,
 			pod: testingpod.MakePod("test-pod", defaultNamespace.Name).
 				Obj(),
 			want: testingpod.MakePod("test-pod", defaultNamespace.Name).
@@ -443,21 +445,23 @@ func TestDefault(t *testing.T) {
 				KueueFinalizer().
 				Obj(),
 		},
-		"default queue isn't created, pod has no queue label": {
-			initObjects:       []client.Object{defaultNamespace},
-			defaultLqExist:    false,
-			podSelector:       &metav1.LabelSelector{},
-			namespaceSelector: defaultNamespaceSelector,
+		"LocalQueueDefaulting enabled, default queue isn't created, pod has no queue label": {
+			initObjects:          []client.Object{defaultNamespace},
+			localQueueDefaulting: true,
+			defaultLqExist:       false,
+			podSelector:          &metav1.LabelSelector{},
+			namespaceSelector:    defaultNamespaceSelector,
 			pod: testingpod.MakePod("test-pod", defaultNamespace.Name).
 				Obj(),
 			want: testingpod.MakePod("test-pod", defaultNamespace.Name).
 				Obj(),
 		},
-		"default queue is created, pod has queue label": {
-			initObjects:       []client.Object{defaultNamespace},
-			defaultLqExist:    true,
-			podSelector:       &metav1.LabelSelector{},
-			namespaceSelector: defaultNamespaceSelector,
+		"LocalQueueDefaulting enabled, default queue is created, pod has queue label": {
+			initObjects:          []client.Object{defaultNamespace},
+			localQueueDefaulting: true,
+			defaultLqExist:       true,
+			podSelector:          &metav1.LabelSelector{},
+			namespaceSelector:    defaultNamespaceSelector,
 			pod: testingpod.MakePod("test-pod", defaultNamespace.Name).
 				Queue("queue").
 				Obj(),
@@ -557,13 +561,14 @@ func TestDefault(t *testing.T) {
 				features.SetFeatureGateDuringTest(t, feature, enabled)
 			}
 			features.SetFeatureGateDuringTest(t, features.TopologyAwareScheduling, tc.enableTopologyAwareScheduling)
+			features.SetFeatureGateDuringTest(t, features.LocalQueueDefaulting, tc.localQueueDefaulting)
 			t.Cleanup(jobframework.EnableIntegrationsForTest(t, tc.enableIntegrations...))
 			builder := utiltesting.NewClientBuilder(rayv1.AddToScheme, kfmpi.AddToScheme, kftraining.AddToScheme, appsv1.AddToScheme)
 			builder = builder.WithObjects(tc.initObjects...)
 			cli := builder.Build()
 
 			cqCache := schdcache.New(cli)
-			queueManager := qcache.NewManagerForUnitTests(cli, cqCache)
+			queueManager := qcache.NewManager(cli, cqCache)
 
 			ctx, _ := utiltesting.ContextWithLog(t)
 

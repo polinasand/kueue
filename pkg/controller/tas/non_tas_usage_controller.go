@@ -36,11 +36,10 @@ import (
 	utiltas "sigs.k8s.io/kueue/pkg/util/tas"
 )
 
-func newNonTasUsageReconciler(k8sClient client.Client, cache *schdcache.Cache, roleTracker *roletracker.RoleTracker) *NonTasUsageReconciler {
+func newNonTasUsageReconciler(k8sClient client.Client, cache *schdcache.Cache) *NonTasUsageReconciler {
 	return &NonTasUsageReconciler{
-		k8sClient:   k8sClient,
-		cache:       cache,
-		roleTracker: roleTracker,
+		k8sClient: k8sClient,
+		cache:     cache,
 	}
 }
 

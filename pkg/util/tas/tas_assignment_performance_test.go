@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
-	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -266,7 +265,7 @@ func BenchmarkV1Beta2From(b *testing.B) {
 		// (This is because longer common prefix & suffix will "hold" for longer).
 		// If we ever wish to test other approaches, we may want to also have
 		// a variant of this benchmark when node names get shuffled quasi-randomly.
-		slices.Sort(nodeNames)
+		sort.Strings(nodeNames)
 		ta := internalSinglePodsOn(nodeNames)
 
 		desc := fmt.Sprintf("Naming scheme %q, %d nodes", tc.name, targetNodeCount)

@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -31,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	"sigs.k8s.io/kueue/cmd/experimental/kueue-populator/pkg/constants"
 )
 
@@ -454,7 +455,7 @@ func TestKueuePopulatorReconciler(t *testing.T) {
 				opts...,
 			)
 
-			ctx := t.Context()
+			ctx := context.Background()
 			_, gotErr := reconciler.Reconcile(ctx, tc.req)
 			if diff := cmp.Diff(tc.wantError, gotErr, cmpopts.EquateErrors()); diff != "" {
 				t.Errorf("Reconcile() error (-want +got):\n%s", diff)

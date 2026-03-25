@@ -32,8 +32,6 @@ type LocalQueue struct {
 	items map[workload.Reference]*workload.Info
 
 	finishedWorkloads sets.Set[workload.Reference]
-
-	labels map[string]string
 }
 
 func newLocalQueue(q *kueue.LocalQueue) *LocalQueue {
@@ -41,7 +39,6 @@ func newLocalQueue(q *kueue.LocalQueue) *LocalQueue {
 		Key:               queue.Key(q),
 		items:             make(map[workload.Reference]*workload.Info),
 		finishedWorkloads: sets.New[workload.Reference](),
-		labels:            q.GetLabels(),
 	}
 	qImpl.update(q)
 	return qImpl
@@ -49,7 +46,6 @@ func newLocalQueue(q *kueue.LocalQueue) *LocalQueue {
 
 func (q *LocalQueue) update(apiQueue *kueue.LocalQueue) {
 	q.ClusterQueue = apiQueue.Spec.ClusterQueue
-	q.labels = apiQueue.GetLabels()
 }
 
 func (q *LocalQueue) AddOrUpdate(info *workload.Info) {

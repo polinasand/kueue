@@ -38,7 +38,6 @@ type tasCache struct {
 	flavorCache map[kueue.ResourceFlavorReference]*TASFlavorCache
 
 	nonTasUsageCache *nonTasUsageCache
-	nodesCache       *nodesCache
 }
 
 func NewTASCache(client client.Client) tasCache {
@@ -51,7 +50,6 @@ func NewTASCache(client client.Client) tasCache {
 			podUsage: make(map[types.NamespacedName]podUsageValue),
 			lock:     sync.RWMutex{},
 		},
-		nodesCache: newNodesCache(),
 	}
 }
 
@@ -128,12 +126,4 @@ func (t *tasCache) Update(pod *corev1.Pod, log logr.Logger) {
 
 func (t *tasCache) DeletePodByKey(key client.ObjectKey) {
 	t.nonTasUsageCache.delete(key)
-}
-
-func (t *tasCache) SyncNode(node *corev1.Node) {
-	t.nodesCache.sync(node)
-}
-
-func (t *tasCache) DeleteNodeByName(nodeName string) {
-	t.nodesCache.delete(nodeName)
 }

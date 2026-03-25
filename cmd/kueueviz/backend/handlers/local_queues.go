@@ -30,7 +30,7 @@ import (
 func (h *Handlers) LocalQueuesWebSocketHandler() gin.HandlerFunc {
 	return h.GenericWebSocketHandler(func(ctx context.Context) (any, error) {
 		return h.fetchLocalQueues(ctx)
-	}, LocalQueuesGVK())
+	})
 }
 
 // LocalQueueDetailsWebSocketHandler streams details for a specific local queue
@@ -38,10 +38,9 @@ func (h *Handlers) LocalQueueDetailsWebSocketHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		namespace := c.Param("namespace")
 		queueName := c.Param("queue_name")
-
 		h.GenericWebSocketHandler(func(ctx context.Context) (any, error) {
 			return h.fetchLocalQueueDetails(ctx, namespace, queueName)
-		}, LocalQueuesGVK())(c)
+		})(c)
 	}
 }
 

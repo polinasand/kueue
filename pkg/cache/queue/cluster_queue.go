@@ -17,7 +17,6 @@ limitations under the License.
 package queue
 
 import (
-	"cmp"
 	"context"
 	"slices"
 	"sync"
@@ -28,6 +27,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
 	"k8s.io/utils/clock"
@@ -38,8 +38,6 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/cache/hierarchy"
 	queueafs "sigs.k8s.io/kueue/pkg/cache/queue/afs"
-	controllerconstants "sigs.k8s.io/kueue/pkg/controller/constants"
-	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/metrics"
 	afs "sigs.k8s.io/kueue/pkg/util/admissionfairsharing"
 	"sigs.k8s.io/kueue/pkg/util/heap"
@@ -56,7 +54,6 @@ const (
 	RequeueReasonFailedAfterNomination RequeueReason = "FailedAfterNomination"
 	RequeueReasonNamespaceMismatch     RequeueReason = "NamespaceMismatch"
 	RequeueReasonGeneric               RequeueReason = ""
-	RequeueReasonPreemptionGated       RequeueReason = "PreemptionGated"
 	RequeueReasonPendingPreemption     RequeueReason = "PendingPreemption"
 	RequeueReasonPreemptionFailed      RequeueReason = "PreemptionFailed"
 )
@@ -87,12 +84,6 @@ func (s *stickyWorkload) set(workload workload.Reference) {
 	s.workloadName = workload
 }
 
-func logStickyWorkloadSelectionIfVerbose(log logr.Logger, wl *kueue.Workload) {
-	if logV := log.V(5); logV.Enabled() {
-		logV.Info("Prioritizing sticky workload", "workload", workload.Key(wl))
-	}
-}
-
 type ClusterQueue struct {
 	hierarchy.ClusterQueue[*cohort]
 	name              kueue.ClusterQueueReference
@@ -102,10 +93,6 @@ type ClusterQueue struct {
 
 	// inadmissibleWorkloads are workloads that have been tried at least once and couldn't be admitted.
 	inadmissibleWorkloads inadmissibleWorkloads
-
-	// noFitSchedulingHashes tracks scheduling equivalence classes that received NoFit.
-	// Cleared when queueInadmissibleWorkloads runs.
-	noFitSchedulingHashes sets.Set[string]
 
 	finishedWorkloads sets.Set[workload.Reference]
 
@@ -121,8 +108,7 @@ type ClusterQueue struct {
 	// QueueInadmissibleWorkloads is called.
 	queueInadmissibleCycle int64
 
-	compareFunc  func(a, b *workload.Info) int
-	snapshotSort func(elements []*workload.Info)
+	lessFunc func(a, b *workload.Info) bool
 
 	queueingStrategy kueue.QueueingStrategy
 
@@ -204,24 +190,13 @@ func newClusterQueueImpl(ctx context.Context, client client.Client, wo workload.
 		opt(options)
 	}
 	sw := stickyWorkload{}
-	log := ctrl.LoggerFrom(ctx)
-	baseCmp := baseCompareFunc(log, wo, &sw)
-	compareFunc := queueOrderingFunc(ctx, client, wo, options.fsResWeights, options.enableAdmissionFs, options.afsEntryPenalties, options.afsConsumedResources, &sw)
-	// Derive lessFunc from compareFunc for the heap.
-	lessFunc := func(a, b *workload.Info) bool { return compareFunc(a, b) < 0 }
-	snapshotSort := buildSnapshotSort(
-		ctx, compareFunc, baseCmp, client,
-		options.enableAdmissionFs, options.fsResWeights,
-		options.afsEntryPenalties, options.afsConsumedResources,
-	)
+	lessFunc := queueOrderingFunc(ctx, client, wo, options.fsResWeights, options.enableAdmissionFs, options.afsEntryPenalties, options.afsConsumedResources, &sw)
 	return &ClusterQueue{
 		heap:                      *heap.New(workloadKey, lessFunc),
 		inadmissibleWorkloads:     make(inadmissibleWorkloads),
-		noFitSchedulingHashes:     sets.New[string](),
 		finishedWorkloads:         sets.New[workload.Reference](),
 		queueInadmissibleCycle:    -1,
-		compareFunc:               compareFunc,
-		snapshotSort:              snapshotSort,
+		lessFunc:                  lessFunc,
 		rwm:                       sync.RWMutex{},
 		clock:                     clock,
 		afsEntryPenalties:         options.afsEntryPenalties,
@@ -248,7 +223,7 @@ func (c *ClusterQueue) Update(apiCQ *kueue.ClusterQueue) error {
 // AddFromLocalQueue pushes all workloads belonging to this queue to
 // the ClusterQueue. If at least one workload is added, returns true,
 // otherwise returns false.
-func (c *ClusterQueue) AddFromLocalQueue(q *LocalQueue, roleTracker *roletracker.RoleTracker, cl *metrics.CustomLabels) bool {
+func (c *ClusterQueue) AddFromLocalQueue(q *LocalQueue, roleTracker *roletracker.RoleTracker) bool {
 	c.rwm.Lock()
 	defer c.rwm.Unlock()
 	added := false
@@ -256,11 +231,9 @@ func (c *ClusterQueue) AddFromLocalQueue(q *LocalQueue, roleTracker *roletracker
 		if c.heap.PushIfNotPresent(info) {
 			added = true
 		}
+		c.finishedWorkloads.Insert(workloadKey(info))
 	}
-	for finishedWorkload := range q.finishedWorkloads {
-		c.finishedWorkloads.Insert(finishedWorkload)
-	}
-	reportCQFinishedWorkloads(c, roleTracker, cl)
+	metrics.ReportFinishedWorkloads(c.GetName(), c.finishedWorkloads.Len(), roleTracker)
 	return added
 }
 
@@ -270,27 +243,17 @@ func (c *ClusterQueue) PushOrUpdate(wInfo *workload.Info) {
 	c.rwm.Lock()
 	defer c.rwm.Unlock()
 	key := workload.Key(wInfo.Obj)
-	// Skip if the scheduler is actively processing this workload.
-	// RequeueWorkload will handle placement with the latest version.
-	if c.inflight != nil && workload.Key(c.inflight.Obj) == key {
-		return
-	}
+	c.forgetInflightByKey(key)
 	if oldInfo := c.inadmissibleWorkloads.get(key); oldInfo != nil {
-		specChangedSinceEval := oldInfo.LastEvaluatedGeneration != 0 &&
-			wInfo.Obj.Generation != oldInfo.LastEvaluatedGeneration
-
-		// Update in place if the workload didn't change to potentially become admissible,
-		// unless Eviction/Requeued status changed which can affect queue order.
-		if !specChangedSinceEval &&
-			equality.Semantic.DeepEqual(oldInfo.Obj.Spec, wInfo.Obj.Spec) &&
-			!priorityBoostAnnotationChanged(oldInfo, wInfo) &&
+		// update in place if the workload was inadmissible and didn't change
+		// to potentially become admissible, unless the Eviction status changed
+		// which can affect the workloads order in the queue.
+		if equality.Semantic.DeepEqual(oldInfo.Obj.Spec, wInfo.Obj.Spec) &&
 			equality.Semantic.DeepEqual(oldInfo.Obj.Status.ReclaimablePods, wInfo.Obj.Status.ReclaimablePods) &&
 			equality.Semantic.DeepEqual(apimeta.FindStatusCondition(oldInfo.Obj.Status.Conditions, kueue.WorkloadEvicted),
 				apimeta.FindStatusCondition(wInfo.Obj.Status.Conditions, kueue.WorkloadEvicted)) &&
 			equality.Semantic.DeepEqual(apimeta.FindStatusCondition(oldInfo.Obj.Status.Conditions, kueue.WorkloadRequeued),
-				apimeta.FindStatusCondition(wInfo.Obj.Status.Conditions, kueue.WorkloadRequeued)) &&
-			workload.HasClosedPreemptionGate(oldInfo.Obj) == workload.HasClosedPreemptionGate(wInfo.Obj) &&
-			!draRequestsChanged(oldInfo, wInfo) {
+				apimeta.FindStatusCondition(wInfo.Obj.Status.Conditions, kueue.WorkloadRequeued)) {
 			c.inadmissibleWorkloads.insert(key, wInfo)
 			return
 		}
@@ -301,30 +264,7 @@ func (c *ClusterQueue) PushOrUpdate(wInfo *workload.Info) {
 		c.inadmissibleWorkloads.insert(key, wInfo)
 		return
 	}
-	// Skip to inadmissible if the workload's equivalence class is already known to be NoFit
-	// (only for BestEffortFIFO; StrictFIFO preserves strict ordering).
-	if c.queueingStrategy == kueue.BestEffortFIFO && c.heap.GetByKey(key) == nil && wInfo.SchedulingHash != workload.SchedulingHashUnknown && c.noFitSchedulingHashes.Has(wInfo.SchedulingHash) {
-		c.inadmissibleWorkloads.insert(key, wInfo)
-		return
-	}
 	c.heap.PushOrUpdate(wInfo)
-}
-
-func priorityBoostAnnotationChanged(oldInfo, newInfo *workload.Info) bool {
-	if !features.Enabled(features.PriorityBoost) {
-		return false
-	}
-	return oldInfo.Obj.Annotations[controllerconstants.PriorityBoostAnnotationKey] != newInfo.Obj.Annotations[controllerconstants.PriorityBoostAnnotationKey]
-}
-
-// draRequestsChanged returns true if DRA preprocessing changed TotalRequests.
-// DRA extended resources are resolved in Reconcile, which can modify TotalRequests
-// without changing the workload Spec.
-func draRequestsChanged(oldInfo, newInfo *workload.Info) bool {
-	if !features.Enabled(features.DynamicResourceAllocation) {
-		return false
-	}
-	return !equality.Semantic.DeepEqual(oldInfo.TotalRequests, newInfo.TotalRequests)
 }
 
 func (c *ClusterQueue) RebuildLocalQueue(lqName string) {
@@ -374,17 +314,15 @@ func (c *ClusterQueue) delete(log logr.Logger, key workload.Reference) {
 
 // DeleteFromLocalQueue removes all workloads belonging to this queue from
 // the ClusterQueue.
-func (c *ClusterQueue) DeleteFromLocalQueue(log logr.Logger, q *LocalQueue, roleTracker *roletracker.RoleTracker, cl *metrics.CustomLabels) {
+func (c *ClusterQueue) DeleteFromLocalQueue(log logr.Logger, q *LocalQueue, roleTracker *roletracker.RoleTracker) {
 	c.rwm.Lock()
 	defer c.rwm.Unlock()
 	for _, w := range q.items {
 		wlKey := workloadKey(w)
 		c.delete(log, wlKey)
+		c.finishedWorkloads.Delete(wlKey)
 	}
-	for fw := range q.finishedWorkloads {
-		c.finishedWorkloads.Delete(fw)
-	}
-	reportCQFinishedWorkloads(c, roleTracker, cl)
+	metrics.ReportFinishedWorkloads(c.GetName(), c.finishedWorkloads.Len(), roleTracker)
 }
 
 // requeueIfNotPresent inserts a workload that cannot be admitted into
@@ -425,12 +363,6 @@ func (c *ClusterQueue) requeueIfNotPresent(log logr.Logger, wInfo *workload.Info
 	}
 	log.V(2).Info(logMsg, "clusterQueue", c.name, "workload", key)
 
-	if features.Enabled(features.SchedulingEquivalenceHashing) && wInfo.SchedulingHash != workload.SchedulingHashUnknown && !immediate {
-		if moved := c.handleInadmissibleHash(wInfo.SchedulingHash); moved > 0 {
-			log.V(2).Info("Bulk-moved equivalent workloads to inadmissible", "hash", wInfo.SchedulingHash, "movedCount", moved)
-		}
-	}
-
 	return true
 }
 
@@ -440,24 +372,32 @@ func (c *ClusterQueue) forgetInflightByKey(key workload.Reference) {
 	}
 }
 
-// handleInadmissibleHash bulk-moves all heap workloads matching the given
-// scheduling hash to inadmissibleWorkloads. Returns the number moved.
-// Only applies to BestEffortFIFO queues; in StrictFIFO the head workload
-// stays in the heap and must not cause equivalent workloads to be skipped.
-func (c *ClusterQueue) handleInadmissibleHash(hash string) int {
-	if c.queueingStrategy != kueue.BestEffortFIFO {
-		return 0
+// QueueInadmissibleWorkloads moves all workloads from inadmissibleWorkloads to heap.
+// If at least one workload is moved, returns true, otherwise returns false.
+func (c *ClusterQueue) QueueInadmissibleWorkloads(ctx context.Context, client client.Client) bool {
+	c.rwm.Lock()
+	defer c.rwm.Unlock()
+	log := ctrl.LoggerFrom(ctx)
+	c.queueInadmissibleCycle = c.popCycle
+	if c.inadmissibleWorkloads.empty() {
+		return false
 	}
-	c.noFitSchedulingHashes.Insert(hash)
-	moved := 0
-	for _, wInfo := range c.heap.List() {
-		if wInfo.SchedulingHash == hash {
-			key := workloadKey(wInfo)
-			c.heap.Delete(key)
-			c.inadmissibleWorkloads.insert(key, wInfo)
-			moved++
+	log.V(2).Info("Resetting the head of the ClusterQueue", "clusterQueue", c.name)
+	inadmissibleWorkloads := make(map[workload.Reference]*workload.Info)
+	moved := false
+	c.inadmissibleWorkloads.forEach(func(key workload.Reference, wInfo *workload.Info) bool {
+		ns := corev1.Namespace{}
+		err := client.Get(ctx, types.NamespacedName{Name: wInfo.Obj.Namespace}, &ns)
+		if err != nil || !c.namespaceSelector.Matches(labels.Set(ns.Labels)) || !c.backoffWaitingTimeExpired(wInfo) {
+			inadmissibleWorkloads[key] = wInfo
+		} else {
+			moved = c.heap.PushIfNotPresent(wInfo) || moved
 		}
-	}
+		return true
+	})
+
+	c.inadmissibleWorkloads.replaceAll(inadmissibleWorkloads)
+	log.V(5).Info("Moved all workloads from inadmissibleWorkloads back to heap", "clusterQueue", c.name)
 	return moved
 }
 
@@ -517,12 +457,13 @@ func (c *ClusterQueue) pendingActiveInLocalQueue(lqRef utilqueue.LocalQueueRefer
 // workloads that were already tried and are waiting for cluster conditions
 // to change to potentially become admissible.
 func (c *ClusterQueue) pendingInadmissibleInLocalQueue(lqRef utilqueue.LocalQueueReference) (inadmissible int) {
-	for _, wl := range c.inadmissibleWorkloads {
+	c.inadmissibleWorkloads.forEach(func(_ workload.Reference, wl *workload.Info) bool {
 		wlLqKey := utilqueue.KeyFromWorkload(wl.Obj)
 		if wlLqKey == lqRef {
 			inadmissible++
 		}
-	}
+		return true
+	})
 	return
 }
 
@@ -542,7 +483,6 @@ func (c *ClusterQueue) Pop() *workload.Info {
 		return nil
 	}
 	c.inflight = c.heap.Pop()
-	c.inflight.LastEvaluatedGeneration = c.inflight.Obj.Generation
 	return c.inflight
 }
 
@@ -586,97 +526,27 @@ func (c *ClusterQueue) Dump() ([]workload.Reference, bool) {
 func (c *ClusterQueue) DumpInadmissible() ([]workload.Reference, bool) {
 	c.rwm.RLock()
 	defer c.rwm.RUnlock()
-	if c.inadmissibleWorkloads.empty() {
+	if len(c.inadmissibleWorkloads) == 0 {
 		return nil, false
 	}
-	elements := make([]workload.Reference, 0, c.inadmissibleWorkloads.len())
+	elements := make([]workload.Reference, 0, len(c.inadmissibleWorkloads))
 	for _, info := range c.inadmissibleWorkloads {
 		elements = append(elements, workload.Key(info.Obj))
 	}
 	return elements, true
 }
 
-// Snapshot returns a copy of pending workloads in queue order.
-// When fair-sharing is enabled, FS usage is pre-computed per LocalQueue
-// from a point-in-time copy of AFS state before sorting.
+// Snapshot returns a copy of the current workloads in the heap of
+// this ClusterQueue.
 func (c *ClusterQueue) Snapshot() []*workload.Info {
 	elements := c.totalElements()
-	c.snapshotSort(elements)
+	slices.SortFunc(elements, func(a, b *workload.Info) int {
+		if c.lessFunc(a, b) {
+			return -1
+		}
+		return 1
+	})
 	return elements
-}
-
-// buildSnapshotSort returns a function that sorts workload elements for Snapshot().
-// When fair-sharing is enabled, it pre-computes FS usage per LocalQueue from
-// deep-copied AFS state to avoid inconsistent comparisons from concurrent updates.
-func buildSnapshotSort(
-	ctx context.Context,
-	compareFunc func(a, b *workload.Info) int,
-	baseCmp func(a, b *workload.Info) int,
-	cl client.Client,
-	enableAdmissionFs bool,
-	fsResWeights map[corev1.ResourceName]float64,
-	afsEntryPenalties *queueafs.AfsEntryPenalties,
-	afsConsumedResources *queueafs.AfsConsumedResources,
-) func(elements []*workload.Info) {
-	if !enableAdmissionFs {
-		return func(elements []*workload.Info) {
-			slices.SortFunc(elements, compareFunc)
-		}
-	}
-
-	log := ctrl.LoggerFrom(ctx)
-	getLQWeight := func(lqKey utilqueue.LocalQueueReference) (float64, bool) {
-		if cl == nil {
-			return 1, true
-		}
-		ns, name := utilqueue.MustParseLocalQueueReference(lqKey)
-		var lq kueue.LocalQueue
-		if err := cl.Get(ctx, client.ObjectKey{Namespace: ns, Name: string(name)}, &lq); err != nil {
-			log.V(2).Error(err, "Failed to get LocalQueue for FS weight", "localQueue", klog.KRef(ns, string(name)))
-			return 0, false
-		}
-		if lq.Spec.FairSharing != nil && lq.Spec.FairSharing.Weight != nil {
-			return lq.Spec.FairSharing.Weight.AsApproximateFloat64(), true
-		}
-		return 1, true
-	}
-
-	return func(elements []*workload.Info) {
-		usageCache := make(map[utilqueue.LocalQueueReference]float64)
-		for _, wInfo := range elements {
-			lqKey := utilqueue.KeyFromWorkload(wInfo.Obj)
-			if _, exists := usageCache[lqKey]; exists {
-				continue
-			}
-			var consumed, penalty corev1.ResourceList
-			if afsConsumedResources != nil {
-				if entry, found := afsConsumedResources.Get(lqKey); found {
-					consumed = entry.Resources.DeepCopy()
-				}
-			}
-			if afsEntryPenalties != nil {
-				penalty = afsEntryPenalties.Peek(lqKey).DeepCopy()
-			}
-			lqWeight, ok := getLQWeight(lqKey)
-			if !ok {
-				continue
-			}
-			usageCache[lqKey] = workload.CalcFSUsageFromResources(consumed, penalty, lqWeight, fsResWeights)
-		}
-
-		slices.SortFunc(elements, func(a, b *workload.Info) int {
-			lqA := utilqueue.KeyFromWorkload(a.Obj)
-			lqB := utilqueue.KeyFromWorkload(b.Obj)
-			usageA, okA := usageCache[lqA]
-			usageB, okB := usageCache[lqB]
-			if okA && okB {
-				if cmpResult := cmp.Compare(usageA, usageB); cmpResult != 0 {
-					return cmpResult
-				}
-			}
-			return baseCmp(a, b)
-		})
-	}
 }
 
 // Info returns workload.Info for the workload key.
@@ -687,12 +557,10 @@ func (c *ClusterQueue) Info(key workload.Reference) *workload.Info {
 	return c.heap.GetByKey(key)
 }
 
-// totalElements returns all pending workloads (heap + inadmissible + inflight).
-// The returned order is non-deterministic; callers should sort if needed.
 func (c *ClusterQueue) totalElements() []*workload.Info {
 	c.rwm.RLock()
 	defer c.rwm.RUnlock()
-	totalLen := c.heap.Len() + c.inadmissibleWorkloads.len()
+	totalLen := c.heap.Len() + len(c.inadmissibleWorkloads)
 	elements := make([]*workload.Info, 0, totalLen)
 	elements = append(elements, c.heap.List()...)
 	for _, e := range c.inadmissibleWorkloads {
@@ -712,10 +580,12 @@ func (c *ClusterQueue) Active() bool {
 }
 
 // RequeueIfNotPresent inserts a workload that was not
-// admitted back into the ClusterQueue.
-// This may be done either "immediately" or "non-immediately";
-// in the latter case the implementation may choose to keep the workload in "inadmissible workloads"
-// where it doesn't compete with other workloads, until cluster events free up quota.
+// admitted back into the ClusterQueue. If the boolean is true,
+// the workloads should be put back in the queue immediately,
+// because we couldn't determine if the workload was admissible
+// in the last cycle. If the boolean is false, the implementation might
+// choose to keep it in temporary placeholder stage where it doesn't
+// compete with other workloads, until cluster events free up quota.
 // The workload should not be reinserted if it's already in the ClusterQueue.
 // Returns true if the workload was inserted.
 func (c *ClusterQueue) RequeueIfNotPresent(ctx context.Context, wInfo *workload.Info, reason RequeueReason) bool {
@@ -730,73 +600,62 @@ func (c *ClusterQueue) RequeueIfNotPresent(ctx context.Context, wInfo *workload.
 		c.sw.set(workload.Key(wInfo.Obj))
 	}
 
-	var immediate bool
 	if c.queueingStrategy == kueue.StrictFIFO {
-		immediate = reason != RequeueReasonNamespaceMismatch
-	} else {
-		immediate = reason == RequeueReasonFailedAfterNomination ||
-			reason == RequeueReasonPendingPreemption ||
-			reason == RequeueReasonPreemptionFailed
+		return c.requeueIfNotPresent(log, wInfo, reason != RequeueReasonNamespaceMismatch)
 	}
-	return c.requeueIfNotPresent(log, wInfo, immediate)
+	return c.requeueIfNotPresent(log, wInfo,
+		reason == RequeueReasonFailedAfterNomination ||
+			reason == RequeueReasonPendingPreemption ||
+			reason == RequeueReasonPreemptionFailed)
 }
 
-// baseCompareFunc orders workloads by sticky status, priority, timestamp, and UID.
-func baseCompareFunc(log logr.Logger, wo workload.Ordering, sw *stickyWorkload) func(a, b *workload.Info) int {
-	return func(a, b *workload.Info) int {
-		aSticky := sw.matches(workload.Key(a.Obj))
-		bSticky := sw.matches(workload.Key(b.Obj))
-		if aSticky != bSticky {
-			if aSticky {
-				logStickyWorkloadSelectionIfVerbose(log, a.Obj)
-				return -1
+// queueOrderingFunc returns a function used by the clusterQueue heap algorithm
+// to sort workloads. The function sorts workloads based on their priority.
+// When priorities are equal, it uses the workload's creation or eviction
+// time.
+func queueOrderingFunc(ctx context.Context, c client.Client, wo workload.Ordering, fsResWeights map[corev1.ResourceName]float64, enableAdmissionFs bool, afsEntryPenalties *queueafs.AfsEntryPenalties, afsConsumedResources *queueafs.AfsConsumedResources, sw *stickyWorkload) func(a, b *workload.Info) bool {
+	log := ctrl.LoggerFrom(ctx)
+	return func(a, b *workload.Info) bool {
+		if enableAdmissionFs {
+			lqAUsage, errA := a.CalcLocalQueueFSUsage(ctx, c, fsResWeights, afsEntryPenalties, afsConsumedResources)
+			lqBUsage, errB := b.CalcLocalQueueFSUsage(ctx, c, fsResWeights, afsEntryPenalties, afsConsumedResources)
+			switch {
+			case errA != nil:
+				log.V(2).Error(errA, "Error determining LocalQueue usage")
+			case errB != nil:
+				log.V(2).Error(errB, "Error determining LocalQueue usage")
+			default:
+				log.V(3).Info("Resource usage from LocalQueue", "localQueue", klog.KRef(a.Obj.Namespace, string(a.Obj.Spec.QueueName)), "usage", lqAUsage)
+				log.V(3).Info("Resource usage from LocalQueue", "localQueue", klog.KRef(b.Obj.Namespace, string(b.Obj.Spec.QueueName)), "usage", lqBUsage)
+				if lqAUsage != lqBUsage {
+					return lqAUsage < lqBUsage
+				}
 			}
-			logStickyWorkloadSelectionIfVerbose(log, b.Obj)
-			return 1
 		}
 
-		p1 := utilpriority.EffectivePriority(log, a.Obj)
-		p2 := utilpriority.EffectivePriority(log, b.Obj)
-		// Higher priority comes first (reverse order).
-		if cmpResult := cmp.Compare(p2, p1); cmpResult != 0 {
-			return cmpResult
+		if sw.matches(workload.Key(a.Obj)) {
+			if logV := log.V(5); logV.Enabled() {
+				logV.Info("Prioritizing sticky workload", "workload", workload.Key(a.Obj))
+			}
+			return true
+		}
+		if sw.matches(workload.Key(b.Obj)) {
+			if logV := log.V(5); logV.Enabled() {
+				logV.Info("Prioritizing sticky workload", "workload", workload.Key(b.Obj))
+			}
+			return false
+		}
+
+		p1 := utilpriority.Priority(a.Obj)
+		p2 := utilpriority.Priority(b.Obj)
+
+		if p1 != p2 {
+			return p1 > p2
 		}
 
 		tA := wo.GetQueueOrderTimestamp(a.Obj)
 		tB := wo.GetQueueOrderTimestamp(b.Obj)
-		if !tA.Equal(tB) {
-			if tA.Before(tB) {
-				return -1
-			}
-			return 1
-		}
-		return cmp.Compare(a.Obj.UID, b.Obj.UID)
-	}
-}
-
-// queueOrderingFunc composes fair-sharing usage (when enabled) with baseCompareFunc.
-func queueOrderingFunc(ctx context.Context, cl client.Client, wo workload.Ordering, fsResWeights map[corev1.ResourceName]float64, enableAdmissionFs bool, afsEntryPenalties *queueafs.AfsEntryPenalties, afsConsumedResources *queueafs.AfsConsumedResources, sw *stickyWorkload) func(a, b *workload.Info) int {
-	log := ctrl.LoggerFrom(ctx)
-	baseCmp := baseCompareFunc(log, wo, sw)
-	if !enableAdmissionFs {
-		return baseCmp
-	}
-	return func(a, b *workload.Info) int {
-		lqAUsage, errA := a.CalcLocalQueueFSUsage(ctx, cl, fsResWeights, afsEntryPenalties, afsConsumedResources)
-		lqBUsage, errB := b.CalcLocalQueueFSUsage(ctx, cl, fsResWeights, afsEntryPenalties, afsConsumedResources)
-		switch {
-		case errA != nil:
-			log.V(2).Error(errA, "Error determining LocalQueue usage")
-		case errB != nil:
-			log.V(2).Error(errB, "Error determining LocalQueue usage")
-		default:
-			log.V(3).Info("Resource usage from LocalQueue", "localQueue", klog.KRef(a.Obj.Namespace, string(a.Obj.Spec.QueueName)), "usage", lqAUsage)
-			log.V(3).Info("Resource usage from LocalQueue", "localQueue", klog.KRef(b.Obj.Namespace, string(b.Obj.Spec.QueueName)), "usage", lqBUsage)
-			if cmpResult := cmp.Compare(lqAUsage, lqBUsage); cmpResult != 0 {
-				return cmpResult
-			}
-		}
-		return baseCmp(a, b)
+		return !tB.Before(tA)
 	}
 }
 

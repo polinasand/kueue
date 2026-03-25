@@ -31,7 +31,6 @@ import (
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
@@ -47,15 +46,12 @@ var (
 	NewReconciler = jobframework.NewGenericReconcilerFactory(NewJob)
 
 	SetupAppWrapperWebhook = jobframework.BaseWebhookFactory(
-		&awv1beta2.AppWrapper{},
-		func(o *awv1beta2.AppWrapper) jobframework.GenericJob {
+		NewJob(),
+		func(o runtime.Object) jobframework.GenericJob {
 			return fromObject(o)
 		},
 	)
 )
-
-var _ admission.Defaulter[*awv1beta2.AppWrapper] = &jobframework.BaseWebhook[*awv1beta2.AppWrapper]{}
-var _ admission.Validator[*awv1beta2.AppWrapper] = &jobframework.BaseWebhook[*awv1beta2.AppWrapper]{}
 
 func init() {
 	utilruntime.Must(jobframework.RegisterIntegration(FrameworkName, jobframework.IntegrationCallbacks{

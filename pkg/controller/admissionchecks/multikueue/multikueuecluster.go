@@ -140,12 +140,12 @@ func (*workloadKueueWatcher) GetEmptyList() client.ObjectList {
 	return &kueue.WorkloadList{}
 }
 
-func (*workloadKueueWatcher) WorkloadKeysFor(o runtime.Object) ([]types.NamespacedName, error) {
+func (*workloadKueueWatcher) WorkloadKeyFor(o runtime.Object) (types.NamespacedName, error) {
 	wl, isWl := o.(*kueue.Workload)
 	if !isWl {
-		return nil, errors.New("not a workload")
+		return types.NamespacedName{}, errors.New("not a workload")
 	}
-	return []types.NamespacedName{client.ObjectKeyFromObject(wl)}, nil
+	return client.ObjectKeyFromObject(wl), nil
 }
 
 // setConfig - will try to recreate the k8s client and restart watching if the new config is different than
@@ -204,10 +204,7 @@ func (rc *remoteClient) setConfig(watchCtx context.Context, config *clientConfig
 
 func (rc *remoteClient) startWatcher(ctx context.Context, kind string, w jobframework.MultiKueueWatcher) error {
 	log := ctrl.LoggerFrom(ctx).WithValues("watchKind", kind)
-	newWatcher, err := rc.client.Watch(ctx, w.GetEmptyList(),
-		client.MatchingLabels{kueue.MultiKueueOriginLabel: rc.origin},
-		&client.ListOptions{Raw: &metav1.ListOptions{AllowWatchBookmarks: true}},
-	)
+	newWatcher, err := rc.client.Watch(ctx, w.GetEmptyList(), client.MatchingLabels{kueue.MultiKueueOriginLabel: rc.origin})
 	if err != nil {
 		return err
 	}
@@ -216,11 +213,6 @@ func (rc *remoteClient) startWatcher(ctx context.Context, kind string, w jobfram
 		log.V(2).Info("Starting watch")
 		for r := range newWatcher.ResultChan() {
 			switch r.Type {
-			case watch.Bookmark:
-				// Bookmark events are periodic signals from the API server to
-				// keep the connection alive. They carry no meaningful payload
-				// and can be safely ignored.
-				log.V(5).Info("Watch bookmark received")
 			case watch.Error:
 				switch s := r.Object.(type) {
 				case *metav1.Status:
@@ -229,13 +221,11 @@ func (rc *remoteClient) startWatcher(ctx context.Context, kind string, w jobfram
 					log.V(3).Info("Watch error with unexpected type", "type", fmt.Sprintf("%T", s))
 				}
 			default:
-				wlKeys, err := w.WorkloadKeysFor(r.Object)
+				wlKey, err := w.WorkloadKeyFor(r.Object)
 				if err != nil {
-					log.Error(err, "Cannot get workload keys", "jobKind", r.Object.GetObjectKind().GroupVersionKind())
+					log.Error(err, "Cannot get workload key", "jobKind", r.Object.GetObjectKind().GroupVersionKind())
 				} else {
-					for _, wlKey := range wlKeys {
-						rc.queueWorkloadEvent(ctx, wlKey)
-					}
+					rc.queueWorkloadEvent(ctx, wlKey)
 				}
 			}
 		}

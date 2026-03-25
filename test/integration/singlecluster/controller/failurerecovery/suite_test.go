@@ -30,7 +30,6 @@ import (
 	configapi "sigs.k8s.io/kueue/apis/config/v1beta2"
 	"sigs.k8s.io/kueue/pkg/constants"
 	"sigs.k8s.io/kueue/pkg/controller/failurerecovery"
-	"sigs.k8s.io/kueue/pkg/webhooks"
 	"sigs.k8s.io/kueue/test/integration/framework"
 )
 
@@ -69,7 +68,4 @@ func managerSetup(_ context.Context, mgr manager.Manager) {
 
 	_, err := terminatingPodReconciler.SetupWithManager(mgr, &configapi.Configuration{})
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
-
-	failedWebhook, err := webhooks.Setup(mgr, nil)
-	gomega.Expect(err).ToNot(gomega.HaveOccurred(), "webhook", failedWebhook)
 }

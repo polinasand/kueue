@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -45,7 +44,7 @@ var (
 )
 
 // createK8sClient initializes Kubernetes clients, checking for in-cluster or local kubeconfig
-func createK8sClient(ctx context.Context) (dynamic.Interface, manager.Manager, kubernetes.Interface, error) {
+func createK8sClient(ctx context.Context) (dynamic.Interface, manager.Manager, error) {
 	var config *rest.Config
 	var err error
 
@@ -53,7 +52,7 @@ func createK8sClient(ctx context.Context) (dynamic.Interface, manager.Manager, k
 	if _, err := os.Stat("/var/run/secrets/kubernetes.io/serviceaccount/token"); err == nil {
 		config, err = rest.InClusterConfig()
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to load in-cluster config: %v", err)
+			return nil, nil, fmt.Errorf("failed to load in-cluster config: %v", err)
 		}
 		slog.Info("Using in-cluster configuration")
 	} else {
@@ -65,7 +64,7 @@ func createK8sClient(ctx context.Context) (dynamic.Interface, manager.Manager, k
 
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to load kubeconfig from %s: %v", kubeconfig, err)
+			return nil, nil, fmt.Errorf("failed to load kubeconfig from %s: %v", kubeconfig, err)
 		}
 		slog.Info("Using kubeconfig", "path", kubeconfig)
 	}
@@ -73,13 +72,7 @@ func createK8sClient(ctx context.Context) (dynamic.Interface, manager.Manager, k
 	// Create the dynamic client
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create dynamic client: %v", err)
-	}
-
-	// Create the typed clientset for TokenReview API
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create kubernetes clientset: %v", err)
+		return nil, nil, fmt.Errorf("failed to create dynamic client: %v", err)
 	}
 
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -94,7 +87,7 @@ func createK8sClient(ctx context.Context) (dynamic.Interface, manager.Manager, k
 
 	mngr, err := ctrl.NewManager(config, opts)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to create controller-runtime manager: %v", err)
+		return nil, nil, fmt.Errorf("failed to create controller-runtime manager: %v", err)
 	}
 
 	err = mngr.GetFieldIndexer().IndexField(ctx, &corev1.Event{}, "involvedObject.name", func(object client.Object) []string {
@@ -103,8 +96,8 @@ func createK8sClient(ctx context.Context) (dynamic.Interface, manager.Manager, k
 	})
 
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to index events by involvedObject.name: %v", err)
+		return nil, nil, fmt.Errorf("failed to index events by involvedObject.name: %v", err)
 	}
 
-	return dynamicClient, mngr, clientset, nil
+	return dynamicClient, mngr, nil
 }

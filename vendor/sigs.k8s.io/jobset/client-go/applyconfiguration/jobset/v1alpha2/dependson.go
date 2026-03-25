@@ -20,12 +20,8 @@ import (
 
 // DependsOnApplyConfiguration represents a declarative configuration of the DependsOn type for use
 // with apply.
-//
-// DependsOn defines the dependency on the previous ReplicatedJob status.
 type DependsOnApplyConfiguration struct {
-	// name of the previous ReplicatedJob.
-	Name *string `json:"name,omitempty"`
-	// status defines the condition for the ReplicatedJob. Only Ready or Complete status can be set.
+	Name   *string                         `json:"name,omitempty"`
 	Status *jobsetv1alpha2.DependsOnStatus `json:"status,omitempty"`
 }
 

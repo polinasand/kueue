@@ -37,6 +37,10 @@ func IsTAS(pod *corev1.Pod) bool {
 	if _, ok := pod.Annotations[kueue.PodSetUnconstrainedTopologyAnnotation]; ok {
 		return true
 	}
+	// TODO: remove after 0.16
+	if _, ok := pod.Labels[kueue.TASLabel]; ok {
+		return true
+	}
 	return false
 }
 

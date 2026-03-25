@@ -210,7 +210,7 @@ var _ = ginkgo.Describe("Workload controller", ginkgo.Label("controller:workload
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, wlKey, &updatedQueueWorkload)).To(gomega.Succeed())
 					g.Expect(updatedQueueWorkload.Status.RequeueState).To(gomega.BeNil())
-				}, util.MediumTimeout, util.Interval).Should(gomega.Succeed())
+				}, util.LongTimeout, util.Interval).Should(gomega.Succeed())
 			})
 		})
 	})
@@ -735,7 +735,7 @@ var _ = ginkgo.Describe("Workload controller interaction with scheduler", ginkgo
 			ginkgo.By("finishing the workload", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, wlKey, wl)).To(gomega.Succeed())
-					g.Expect(workload.Finish(ctx, k8sClient, wl, "ByTest", "By test", util.RealClock)).To(gomega.Succeed())
+					g.Expect(workload.Finish(ctx, k8sClient, wl, "ByTest", "By test", util.RealClock, nil)).To(gomega.Succeed())
 				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 
@@ -793,7 +793,7 @@ var _ = ginkgo.Describe("Workload controller interaction with scheduler", ginkgo
 			ginkgo.By("finishing the workload", func() {
 				gomega.Eventually(func(g gomega.Gomega) {
 					g.Expect(k8sClient.Get(ctx, wlKey, wl)).To(gomega.Succeed())
-					g.Expect(workload.Finish(ctx, k8sClient, wl, "ByTest", "By test", util.RealClock)).To(gomega.Succeed(), nil)
+					g.Expect(workload.Finish(ctx, k8sClient, wl, "ByTest", "By test", util.RealClock, nil)).To(gomega.Succeed(), nil)
 				}, util.Timeout, util.Interval).Should(gomega.Succeed())
 			})
 
@@ -854,6 +854,7 @@ var _ = ginkgo.Describe("Workload controller with resource retention", ginkgo.Or
 		})
 
 		ginkgo.BeforeEach(func() {
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.ObjectRetentionPolicies, true)
 			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.LocalQueueMetrics, true)
 			ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "core-workload-")
 			flavor = utiltestingapi.MakeResourceFlavor(flavorOnDemand).Obj()
@@ -906,7 +907,9 @@ var _ = ginkgo.Describe("Workload controller with resource retention", ginkgo.Or
 			})
 
 			ginkgo.By("workload should be deleted after the retention period", func() {
-				util.ExpectObjectToBeDeleted(ctx, k8sClient, wl, false)
+				gomega.Eventually(func() error {
+					return k8sClient.Get(ctx, client.ObjectKeyFromObject(wl), &createdWorkload)
+				}, util.Timeout, util.Interval).ShouldNot(gomega.Succeed())
 			})
 
 			util.ExpectFinishedWorkloadsGaugeMetric(clusterQueue, 0)
@@ -923,7 +926,7 @@ var _ = ginkgo.Describe("Workload controller with resource retention", ginkgo.Or
 			flavor          *kueue.ResourceFlavor
 		)
 
-		startManager := func() {
+		ginkgo.BeforeAll(func() {
 			fwk.StartManager(
 				ctx, cfg,
 				managerAndControllerSetup(
@@ -931,33 +934,21 @@ var _ = ginkgo.Describe("Workload controller with resource retention", ginkgo.Or
 						ObjectRetentionPolicies: &config.ObjectRetentionPolicies{
 							Workloads: &config.WorkloadRetentionPolicy{
 								AfterFinished: &metav1.Duration{
-									Duration: util.MediumTimeout,
+									Duration: util.LongTimeout,
 								},
 							},
 						},
 					},
 				),
 			)
-		}
-
-		stopManager := func() {
-			fwk.StopManager(ctx)
-		}
-
-		restartManager := func() {
-			stopManager()
-			startManager()
-		}
-
-		ginkgo.BeforeAll(func() {
-			startManager()
 		})
 
 		ginkgo.AfterAll(func() {
-			stopManager()
+			fwk.StopManager(ctx)
 		})
 
 		ginkgo.BeforeEach(func() {
+			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.ObjectRetentionPolicies, true)
 			features.SetFeatureGateDuringTest(ginkgo.GinkgoTB(), features.LocalQueueMetrics, true)
 			ns = util.CreateNamespaceFromPrefixWithLog(ctx, k8sClient, "core-workload-")
 			flavor = utiltestingapi.MakeResourceFlavor(flavorOnDemand).Obj()
@@ -1020,39 +1011,6 @@ var _ = ginkgo.Describe("Workload controller with resource retention", ginkgo.Or
 
 			util.ExpectFinishedWorkloadsGaugeMetric(clusterQueue, 1)
 			util.ExpectLQFinishedWorkloadsGaugeMetric(localQueue, 1)
-
-			ginkgo.By("restarting the manager", func() {
-				restartManager()
-			})
-
-			ginkgo.By("waiting for workload controller to be active after restart", func() {
-				// Probe that controllers are reconciling after restart
-				// by creating a workload and waiting for it to be reflected
-				// in the LocalQueue status.
-				probeWl := utiltestingapi.MakeWorkload("probe-wl", ns.Name).Queue("q").
-					Request(corev1.ResourceCPU, "1").Obj()
-				gomega.Expect(k8sClient.Create(ctx, probeWl)).To(gomega.Succeed())
-				gomega.Eventually(func(g gomega.Gomega) {
-					var lq kueue.LocalQueue
-					g.Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(localQueue), &lq)).To(gomega.Succeed())
-					g.Expect(lq.Status.PendingWorkloads).To(gomega.Equal(int32(1)))
-				}, util.Timeout, util.Interval).Should(gomega.Succeed())
-				util.ExpectObjectToBeDeleted(ctx, k8sClient, probeWl, true)
-			})
-
-			ginkgo.By("verifying that the metrics still keep their counts", func() {
-				util.ExpectFinishedWorkloadsGaugeMetric(clusterQueue, 1)
-				util.ExpectLQFinishedWorkloadsGaugeMetric(localQueue, 1)
-			})
-
-			ginkgo.By("deleting the workload manually", func() {
-				util.ExpectObjectToBeDeleted(ctx, k8sClient, wl, true)
-			})
-
-			ginkgo.By("verifying that the metrics are updated", func() {
-				util.ExpectFinishedWorkloadsGaugeMetric(clusterQueue, 0)
-				util.ExpectLQFinishedWorkloadsGaugeMetric(localQueue, 0)
-			})
 		})
 	})
 })

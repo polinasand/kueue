@@ -1,49 +1,49 @@
 ---
-title: "安装"
-linkTitle: "安装"
+title: "Installation"
+linkTitle: "Installation"
 date: 2024-05-09
 weight: 20
 description: >
-  安装 kubectl-kueue 插件，kueuectl。
+  Installing the kubectl-kueue plugin, kueuectl.
 ---
 
-## 通过 Krew 安装
+## Installing via Krew
 
 ```shell
 kubectl krew install kueue
 ```
 
-## 从发布的二进制文件安装
+## Installing From Release Binaries
 
-### 1. 下载最新版本：
+### 1. Download the latest release:
 
-在 Linux 上：
+On Linux:
 
 {{< tabpane lang="shell" persist=disabled >}}
 {{< tab header="AMD64 / x86_64"  >}}curl -Lo ./kubectl-kueue https://github.com/kubernetes-sigs/kueue/releases/download/{{< param "version" >}}/kubectl-kueue-linux-amd64{{< /tab >}}
 {{< tab header="ARM64" >}}curl -Lo ./kubectl-kueue https://github.com/kubernetes-sigs/kueue/releases/download/{{< param "version" >}}/kubectl-kueue-linux-arm64{{< /tab >}}
 {{< /tabpane >}}
 
-在 Mac 上：
+On Mac:
 
 {{< tabpane lang="shell" persist=disabled >}}
 {{< tab header="AMD64 / x86_64" >}}curl -Lo ./kubectl-kueue https://github.com/kubernetes-sigs/kueue/releases/download/{{< param "version" >}}/kubectl-kueue-darwin-amd64{{< /tab >}}
 {{< tab header="ARM64" >}}curl -Lo ./kubectl-kueue https://github.com/kubernetes-sigs/kueue/releases/download/{{< param "version" >}}/kubectl-kueue-darwin-arm64{{< /tab >}}
 {{< /tabpane >}}
 
-### 2. 使 kubectl-kueue 二进制文件可执行。
+### 2. Make the kubectl-kueue binary executable.
 
 ```shell
 chmod +x ./kubectl-kueue
 ```
 
-### 3. 将 kubectl 二进制文件移动到系统 PATH 中的某个文件位置。
+### 3. Move the kubectl binary to a file location on your system PATH.
 
 ```shell
 sudo mv ./kubectl-kueue /usr/local/bin/kubectl-kueue
 ```
 
-## 从源代码安装
+## Installing From Source
 
 ```bash
 make kueuectl
@@ -52,14 +52,14 @@ sudo mv ./bin/kubectl-kueue /usr/local/bin/kubectl-kueue
 
 ## Kueuectl
 
-此外，你还可以创建别名 `kueuectl` 以允许使用更简洁的语法。
+Additionally, you can create an alias `kueuectl` to allow shorter syntax.
 
 {{< tabpane lang=shell persist=disabled >}}
 {{< tab header="Bash" >}}echo 'alias kueuectl="kubectl kueue"' >> ~/.bashrc{{< /tab >}}
 {{< tab header="Zsh" >}}echo 'alias kueuectl="kubectl kueue"' >> ~/.zshrc{{< /tab >}}
 {{< /tabpane >}}
 
-## 自动补全
+## Autocompletion
 
 {{< tabpane lang=shell persist=disabled >}}
 {{< tab header="Bash" >}}echo '[[ $commands[kubectl-kueue] ]] && source <(kubectl-kueue completion bash)' >> ~/.bashrc{{< /tab >}}

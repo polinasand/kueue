@@ -25,7 +25,6 @@ import (
 
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
-	prometheusv1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -38,7 +37,6 @@ var (
 	ctx              context.Context
 	cfg              *rest.Config
 	restClient       *rest.RESTClient
-	prometheusClient prometheusv1.API
 	kueueNS          = util.GetKueueNamespace()
 	visibilityClient visibility.VisibilityV1beta2Interface
 )
@@ -66,11 +64,6 @@ var _ = ginkgo.BeforeSuite(func() {
 
 	waitForAvailableStart := time.Now()
 	util.WaitForKueueAvailability(ctx, k8sClient)
-	labelFilter := ginkgo.GinkgoLabelFilter()
-	if ginkgo.Label("feature:prometheus").MatchesLabelFilter(labelFilter) {
-		prometheusClient = util.CreatePrometheusClient(cfg)
-		util.WaitForPrometheusAvailability(ctx, k8sClient)
-	}
 	ginkgo.GinkgoLogr.Info(
 		"Kueue and all required operators are available in the cluster",
 		"waitingTime", time.Since(waitForAvailableStart),

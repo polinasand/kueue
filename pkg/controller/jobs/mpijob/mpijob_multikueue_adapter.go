@@ -109,16 +109,16 @@ func (*multiKueueAdapter) GetEmptyList() client.ObjectList {
 	return &kfmpi.MPIJobList{}
 }
 
-func (*multiKueueAdapter) WorkloadKeysFor(o runtime.Object) ([]types.NamespacedName, error) {
+func (*multiKueueAdapter) WorkloadKeyFor(o runtime.Object) (types.NamespacedName, error) {
 	job, isJob := o.(*kfmpi.MPIJob)
 	if !isJob {
-		return nil, errors.New("not a mpijob")
+		return types.NamespacedName{}, errors.New("not a mpijob")
 	}
 
 	prebuiltWl, hasPrebuiltWorkload := job.Labels[constants.PrebuiltWorkloadLabel]
 	if !hasPrebuiltWorkload {
-		return nil, fmt.Errorf("no prebuilt workload found for mpijob: %s", klog.KObj(job))
+		return types.NamespacedName{}, fmt.Errorf("no prebuilt workload found for mpijob: %s", klog.KObj(job))
 	}
 
-	return []types.NamespacedName{{Name: prebuiltWl, Namespace: job.Namespace}}, nil
+	return types.NamespacedName{Name: prebuiltWl, Namespace: job.Namespace}, nil
 }

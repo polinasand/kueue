@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/validation"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,10 +36,10 @@ import (
 	"sigs.k8s.io/kueue/pkg/constants"
 	ctrlconstants "sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
+	"sigs.k8s.io/kueue/pkg/controller/jobframework/webhook"
 	podconstants "sigs.k8s.io/kueue/pkg/controller/jobs/pod/constants"
 	"sigs.k8s.io/kueue/pkg/features"
 	utilpod "sigs.k8s.io/kueue/pkg/util/pod"
-	"sigs.k8s.io/kueue/pkg/util/webhook"
 )
 
 var (
@@ -71,20 +72,18 @@ func SetupWebhook(mgr ctrl.Manager, opts ...jobframework.Option) error {
 		managedJobsNamespaceSelector: options.ManagedJobsNamespaceSelector,
 	}
 	obj := &corev1.Pod{}
-	if options.NoopWebhook {
-		return webhook.SetupNoopWebhook(mgr, obj)
-	}
-	return ctrl.NewWebhookManagedBy(mgr, obj).
-		WithDefaulter(wh).
+	return webhook.WebhookManagedBy(mgr).
+		For(obj).
+		WithMutationHandler(admission.WithCustomDefaulter(mgr.GetScheme(), obj, wh)).
 		WithValidator(wh).
-		WithLogConstructor(jobframework.WebhookLogConstructor(FromObject(obj).GVK(), options.RoleTracker)).
+		WithRoleTracker(options.RoleTracker).
 		Complete()
 }
 
 // +kubebuilder:webhook:path=/mutate--v1-pod,mutating=true,failurePolicy=fail,sideEffects=None,groups="",resources=pods,verbs=create,versions=v1,name=mpod.kb.io,admissionReviewVersions=v1
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
 
-var _ admission.Defaulter[*corev1.Pod] = &PodWebhook{}
+var _ admission.CustomDefaulter = &PodWebhook{}
 
 // addRoleHash calculates the role hash and adds it to the pod's annotations
 func (p *Pod) addRoleHash() error {
@@ -101,7 +100,7 @@ func (p *Pod) addRoleHash() error {
 	return nil
 }
 
-func (w *PodWebhook) Default(ctx context.Context, obj *corev1.Pod) error {
+func (w *PodWebhook) Default(ctx context.Context, obj runtime.Object) error {
 	pod := FromObject(obj)
 	log := ctrl.LoggerFrom(ctx).WithName("pod-webhook")
 	log.V(5).Info("Applying defaults")
@@ -149,7 +148,8 @@ func (w *PodWebhook) Default(ctx context.Context, obj *corev1.Pod) error {
 		}
 
 		// Local queue defaulting
-		if jobframework.QueueNameForObject(pod.Object()) == "" &&
+		if features.Enabled(features.LocalQueueDefaulting) &&
+			jobframework.QueueNameForObject(pod.Object()) == "" &&
 			w.queues.DefaultLocalQueueExist(pod.pod.GetNamespace()) {
 			if pod.pod.Labels == nil {
 				pod.pod.Labels = make(map[string]string)
@@ -186,7 +186,7 @@ func (w *PodWebhook) Default(ctx context.Context, obj *corev1.Pod) error {
 			return err
 		}
 		// copy back changes to the object
-		pod.pod.DeepCopyInto(obj)
+		pod.pod.DeepCopyInto(obj.(*corev1.Pod))
 	}
 
 	return nil
@@ -194,9 +194,9 @@ func (w *PodWebhook) Default(ctx context.Context, obj *corev1.Pod) error {
 
 // +kubebuilder:webhook:path=/validate--v1-pod,mutating=false,failurePolicy=fail,sideEffects=None,groups="",resources=pods,verbs=create;update,versions=v1,name=vpod.kb.io,admissionReviewVersions=v1
 
-var _ admission.Validator[*corev1.Pod] = &PodWebhook{}
+var _ admission.CustomValidator = &PodWebhook{}
 
-func (w *PodWebhook) ValidateCreate(ctx context.Context, obj *corev1.Pod) (admission.Warnings, error) {
+func (w *PodWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	var warnings admission.Warnings
 
 	pod := FromObject(obj)
@@ -213,7 +213,7 @@ func (w *PodWebhook) ValidateCreate(ctx context.Context, obj *corev1.Pod) (admis
 	return warnings, allErrs.ToAggregate()
 }
 
-func (w *PodWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj *corev1.Pod) (admission.Warnings, error) {
+func (w *PodWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
 	var warnings admission.Warnings
 
 	oldPod := FromObject(oldObj)
@@ -238,7 +238,7 @@ func (w *PodWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj *corev1.
 	return warnings, allErrs.ToAggregate()
 }
 
-func (w *PodWebhook) ValidateDelete(context.Context, *corev1.Pod) (admission.Warnings, error) {
+func (w *PodWebhook) ValidateDelete(context.Context, runtime.Object) (admission.Warnings, error) {
 	return nil, nil
 }
 

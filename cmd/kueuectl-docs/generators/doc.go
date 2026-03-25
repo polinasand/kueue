@@ -24,7 +24,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"slices"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -58,6 +58,12 @@ type Link struct {
 	Description string
 	Path        string
 }
+
+type byName []*cobra.Command
+
+func (s byName) Len() int           { return len(s) }
+func (s byName) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+func (s byName) Less(i, j int) bool { return s[i].Name() < s[j].Name() }
 
 func GenMarkdownTree(cmd *cobra.Command, templatesDir, outputDir string) error {
 	identity := func(s string) string { return s }
@@ -305,9 +311,8 @@ func getLinks(cmd *cobra.Command, linkHandler func(string) string, indexFile boo
 	}
 
 	name := cmd.CommandPath()
-	children := slices.SortedFunc(slices.Values(cmd.Commands()), func(a, b *cobra.Command) int {
-		return strings.Compare(a.Name(), b.Name())
-	})
+	children := cmd.Commands()
+	sort.Sort(byName(children))
 
 	for _, child := range children {
 		if !child.IsAvailableCommand() || child.IsAdditionalHelpTopicCommand() {

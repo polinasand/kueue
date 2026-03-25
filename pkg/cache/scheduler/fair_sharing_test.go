@@ -43,11 +43,10 @@ func TestDominantResourceShare(t *testing.T) {
 	)
 
 	type fairSharingResult struct {
-		Name      string
-		NodeType  nodeType
-		DrValue   int64
-		DrName    corev1.ResourceName
-		Borrowing bool
+		Name     string
+		NodeType nodeType
+		DrValue  int64
+		DrName   corev1.ResourceName
 	}
 
 	cases := map[string]struct {
@@ -72,11 +71,10 @@ func TestDominantResourceShare(t *testing.T) {
 				).Obj(),
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -105,25 +103,22 @@ func TestDominantResourceShare(t *testing.T) {
 				).Obj(),
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "lending-cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "lending-cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "test-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "test-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -152,25 +147,22 @@ func TestDominantResourceShare(t *testing.T) {
 				).Obj(),
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "example.com/gpu",
-					DrValue:   200, // (7-5)*1000/10
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   "example.com/gpu",
+					DrValue:  200, // (7-5)*1000/10
 				},
 				{
-					Name:      "lending-cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "lending-cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "test-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "test-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -196,25 +188,22 @@ func TestDominantResourceShare(t *testing.T) {
 				).Obj(),
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "example.com/gpu",
-					DrValue:   1,
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   "example.com/gpu",
+					DrValue:  1,
 				},
 				{
-					Name:      "lending-cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "lending-cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "test-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "test-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -240,25 +229,22 @@ func TestDominantResourceShare(t *testing.T) {
 				).Obj(),
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "example.com/gpu",
-					DrValue:   1,
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   "example.com/gpu",
+					DrValue:  1,
 				},
 				{
-					Name:      "lending-cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "lending-cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "test-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "test-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -287,25 +273,22 @@ func TestDominantResourceShare(t *testing.T) {
 				).Obj(),
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    corev1.ResourceCPU,
-					DrValue:   100, // (3-2)*1000/10
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   corev1.ResourceCPU,
+					DrValue:  100, // (3-2)*1000/10
 				},
 				{
-					Name:      "lending-cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "lending-cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "test-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "test-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -338,25 +321,22 @@ func TestDominantResourceShare(t *testing.T) {
 			},
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    corev1.ResourceCPU,
-					DrValue:   300, // (1+4-2)*1000/10
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   corev1.ResourceCPU,
+					DrValue:  300, // (1+4-2)*1000/10
 				},
 				{
-					Name:      "lending-cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "lending-cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "test-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "test-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -389,25 +369,22 @@ func TestDominantResourceShare(t *testing.T) {
 			},
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    corev1.ResourceCPU,
-					DrValue:   300, // (1+4-2)*1000/10
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   corev1.ResourceCPU,
+					DrValue:  300, // (1+4-2)*1000/10
 				},
 				{
-					Name:      "lending-cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "lending-cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "test-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "test-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -440,25 +417,22 @@ func TestDominantResourceShare(t *testing.T) {
 			},
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    corev1.ResourceCPU,
-					DrValue:   25, // ((15+10-20)+0)*1000/200 (spot under nominal)
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   corev1.ResourceCPU,
+					DrValue:  25, // ((15+10-20)+0)*1000/200 (spot under nominal)
 				},
 				{
-					Name:      "lending-cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "lending-cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "test-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "test-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -484,25 +458,22 @@ func TestDominantResourceShare(t *testing.T) {
 				).Obj(),
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "example.com/gpu",
-					DrValue:   100, // ((7-5)*1000/10)/2
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   "example.com/gpu",
+					DrValue:  100, // ((7-5)*1000/10)/2
 				},
 				{
-					Name:      "lending-cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "lending-cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "test-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "test-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -528,25 +499,22 @@ func TestDominantResourceShare(t *testing.T) {
 				).Obj(),
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "example.com/gpu",
-					DrValue:   400, // ((7-5)*1000/10)/(1/2)
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   "example.com/gpu",
+					DrValue:  400, // ((7-5)*1000/10)/(1/2)
 				},
 				{
-					Name:      "lending-cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "lending-cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "test-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "test-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -572,25 +540,22 @@ func TestDominantResourceShare(t *testing.T) {
 				).Obj(),
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "example.com/gpu",
-					DrValue:   math.MaxInt,
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   "example.com/gpu",
+					DrValue:  math.MaxInt,
 				},
 				{
-					Name:      "lending-cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "lending-cq",
+					NodeType: nodeTypeCq,
+					DrName:   "",
+					DrValue:  0,
 				},
 				{
-					Name:      "test-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "test-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -616,25 +581,22 @@ func TestDominantResourceShare(t *testing.T) {
 			},
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "example.com/gpu",
-					DrValue:   100, // (5 / 50) * 1000
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   "example.com/gpu",
+					DrValue:  100, // (5 / 50) * 1000
 				},
 				{
-					Name:      "child-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "example.com/gpu",
-					DrValue:   50, // (5 / 50) * 1000 / 2
-					Borrowing: true,
+					Name:     "child-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "example.com/gpu",
+					DrValue:  50, // (5 / 50) * 1000 / 2
 				},
 				{
-					Name:      "root",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "root",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -660,25 +622,22 @@ func TestDominantResourceShare(t *testing.T) {
 			},
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "example.com/gpu",
-					DrValue:   200, // (10 / 50) * 1000
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   "example.com/gpu",
+					DrValue:  200, // (10 / 50) * 1000
 				},
 				{
-					Name:      "child-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "example.com/gpu",
-					DrValue:   100, // (10 / 50) * 1000 / 2
-					Borrowing: true,
+					Name:     "child-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "example.com/gpu",
+					DrValue:  100, // (10 / 50) * 1000 / 2
 				},
 				{
-					Name:      "root",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "root",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -710,25 +669,22 @@ func TestDominantResourceShare(t *testing.T) {
 			},
 			want: []fairSharingResult{
 				{
-					Name:      "cq",
-					NodeType:  nodeTypeCq,
-					DrName:    "example.com/gpu",
-					DrValue:   1000, // (10 / 10) * 1000
-					Borrowing: true,
+					Name:     "cq",
+					NodeType: nodeTypeCq,
+					DrName:   "example.com/gpu",
+					DrValue:  1000, // (10 / 10) * 1000
 				},
 				{
-					Name:      "child-cohort",
-					NodeType:  nodeTypeCohort,
-					DrName:    "example.com/gpu",
-					DrValue:   200, // (10 / 50) * 1000
-					Borrowing: true,
+					Name:     "child-cohort",
+					NodeType: nodeTypeCohort,
+					DrName:   "example.com/gpu",
+					DrValue:  200, // (10 / 50) * 1000
 				},
 				{
-					Name:      "root",
-					NodeType:  nodeTypeCohort,
-					DrName:    "",
-					DrValue:   0,
-					Borrowing: false,
+					Name:     "root",
+					NodeType: nodeTypeCohort,
+					DrName:   "",
+					DrValue:  0,
 				},
 			},
 		},
@@ -778,22 +734,20 @@ func TestDominantResourceShare(t *testing.T) {
 				drs := dominantResourceShare(cq, tc.flvResQ)
 				drVal, drName := drs.roundedWeightedShare()
 				gotCache = append(gotCache, fairSharingResult{
-					Name:      string(cq.Name),
-					NodeType:  nodeTypeCq,
-					DrValue:   drVal,
-					DrName:    drName,
-					Borrowing: drs.IsBorrowing(),
+					Name:     string(cq.Name),
+					NodeType: nodeTypeCq,
+					DrValue:  drVal,
+					DrName:   drName,
 				})
 			}
 			for _, cohort := range cacheCohortsMap {
 				drs := dominantResourceShare(cohort, tc.flvResQ)
 				drVal, drName := drs.roundedWeightedShare()
 				gotCache = append(gotCache, fairSharingResult{
-					Name:      string(cohort.Name),
-					NodeType:  nodeTypeCohort,
-					DrValue:   drVal,
-					DrName:    drName,
-					Borrowing: drs.IsBorrowing(),
+					Name:     string(cohort.Name),
+					NodeType: nodeTypeCohort,
+					DrValue:  drVal,
+					DrName:   drName,
 				})
 			}
 			if diff := cmp.Diff(sets.New(tc.want...), sets.New(gotCache...)); diff != "" {
@@ -807,22 +761,20 @@ func TestDominantResourceShare(t *testing.T) {
 				drs := dominantResourceShare(cq, tc.flvResQ)
 				drVal, drName := drs.roundedWeightedShare()
 				gotSnapshot = append(gotSnapshot, fairSharingResult{
-					Name:      string(cq.Name),
-					NodeType:  nodeTypeCq,
-					DrValue:   drVal,
-					DrName:    drName,
-					Borrowing: drs.IsBorrowing(),
+					Name:     string(cq.Name),
+					NodeType: nodeTypeCq,
+					DrValue:  drVal,
+					DrName:   drName,
 				})
 			}
 			for _, cohort := range snapshotCohortsMap {
 				drs := dominantResourceShare(cohort, tc.flvResQ)
 				drVal, drName := drs.roundedWeightedShare()
 				gotSnapshot = append(gotSnapshot, fairSharingResult{
-					Name:      string(cohort.Name),
-					NodeType:  nodeTypeCohort,
-					DrValue:   drVal,
-					DrName:    drName,
-					Borrowing: drs.IsBorrowing(),
+					Name:     string(cohort.Name),
+					NodeType: nodeTypeCohort,
+					DrValue:  drVal,
+					DrName:   drName,
 				})
 			}
 			if diff := cmp.Diff(sets.New(tc.want...), sets.New(gotSnapshot...)); diff != "" {

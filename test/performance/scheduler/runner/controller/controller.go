@@ -20,6 +20,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"testing"
 	"time"
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -79,10 +80,8 @@ func (r *reconciler) Create(ev event.CreateEvent) bool {
 	wl, isWl := (ev.Object).(*kueue.Workload)
 	if isWl {
 		r.recorder.RecordWorkloadState(wl)
-		admitted := apimeta.IsStatusConditionTrue(wl.Status.Conditions, kueue.WorkloadAdmitted)
-		return admitted && !workload.IsFinished(wl)
 	}
-	return true
+	return !isWl
 }
 
 func (r *reconciler) Delete(_ event.DeleteEvent) bool {
@@ -154,12 +153,34 @@ func (r *reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
-func NewReconciler(c client.Client, r *recorder.Recorder) *reconciler {
+func NewReconciler(c client.Client, r *recorder.Recorder, opts ...Option) *reconciler {
+	options := defaultOptions
+
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	return &reconciler{
 		client:        c,
 		admissionTime: map[types.UID]time.Time{},
 		recorder:      r,
-		clock:         util.RealClock,
+		clock:         options.clock,
+	}
+}
+
+type options struct {
+	clock clock.Clock
+}
+
+type Option func(*options)
+
+var defaultOptions = options{
+	clock: util.RealClock,
+}
+
+func WithClock(_ testing.TB, c clock.Clock) Option {
+	return func(o *options) {
+		o.clock = c
 	}
 }
 

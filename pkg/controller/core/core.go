@@ -26,9 +26,7 @@ import (
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/constants"
 	"sigs.k8s.io/kueue/pkg/features"
-	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/scheduler/preemption/fairsharing"
-	"sigs.k8s.io/kueue/pkg/util/expectations"
 	"sigs.k8s.io/kueue/pkg/util/roletracker"
 	"sigs.k8s.io/kueue/pkg/util/waitforpodsready"
 )
@@ -39,9 +37,7 @@ const (
 
 // SetupControllers sets up the core controllers. It returns the name of the
 // controller that failed to create and an error, if any.
-func SetupControllers(mgr ctrl.Manager, qManager *qcache.Manager, cc *schdcache.Cache, cfg *configapi.Configuration, roleTracker *roletracker.RoleTracker,
-	preemptionExpectations *expectations.Store, customLabels *metrics.CustomLabels) (string, error) {
-	lqMetrics := metrics.NewLocalQueueMetricsConfig(cfg.Metrics.LocalQueueMetrics)
+func SetupControllers(mgr ctrl.Manager, qManager *qcache.Manager, cc *schdcache.Cache, cfg *configapi.Configuration, roleTracker *roletracker.RoleTracker) (string, error) {
 	rfRec := NewResourceFlavorReconciler(mgr.GetClient(), qManager, cc, roleTracker)
 	if err := rfRec.SetupWithManager(mgr, cfg); err != nil {
 		return "ResourceFlavor", err
@@ -56,23 +52,22 @@ func SetupControllers(mgr ctrl.Manager, qManager *qcache.Manager, cc *schdcache.
 	}
 	qRec := NewLocalQueueReconciler(mgr.GetClient(), qManager, cc,
 		WithAdmissionFairSharingConfig(cfg.AdmissionFairSharing),
-		WithRoleTracker(roleTracker),
-		WithCustomLabels(customLabels),
-		WithLocalQueueMetrics(lqMetrics))
+		WithRoleTracker(roleTracker))
 	if err := qRec.SetupWithManager(mgr, cfg); err != nil {
 		return "LocalQueue", err
 	}
 
 	fairSharingEnabled := fairsharing.Enabled(cfg.FairSharing)
 	watchers := []ClusterQueueUpdateWatcher{rfRec, acRec}
-	cohortRec := NewCohortReconciler(mgr.GetClient(), cc, qManager,
-		CohortReconcilerWithFairSharing(fairSharingEnabled),
-		CohortReconcilerWithRoleTracker(roleTracker),
-		CohortReconcilerWithCustomLabels(customLabels))
-	if err := cohortRec.SetupWithManager(mgr, cfg); err != nil {
-		return "Cohort", err
+	if features.Enabled(features.HierarchicalCohorts) {
+		cohortRec := NewCohortReconciler(mgr.GetClient(), cc, qManager,
+			CohortReconcilerWithFairSharing(fairSharingEnabled),
+			CohortReconcilerWithRoleTracker(roleTracker))
+		if err := cohortRec.SetupWithManager(mgr, cfg); err != nil {
+			return "Cohort", err
+		}
+		watchers = append(watchers, cohortRec)
 	}
-	watchers = append(watchers, cohortRec)
 
 	cqRec := NewClusterQueueReconciler(
 		mgr.GetClient(),
@@ -82,7 +77,6 @@ func SetupControllers(mgr ctrl.Manager, qManager *qcache.Manager, cc *schdcache.
 		WithFairSharing(fairSharingEnabled),
 		WithWatchers(watchers...),
 		WithClusterQueueRoleTracker(roleTracker),
-		WithClusterQueueCustomLabels(customLabels),
 	)
 	rfRec.AddUpdateWatcher(cqRec)
 	acRec.AddUpdateWatchers(cqRec)
@@ -96,9 +90,6 @@ func SetupControllers(mgr ctrl.Manager, qManager *qcache.Manager, cc *schdcache.
 		WithWaitForPodsReady(waitForPodsReady(cfg.WaitForPodsReady)),
 		WithWorkloadRetention(workloadRetention(cfg.ObjectRetentionPolicies)),
 		WithWorkloadRoleTracker(roleTracker),
-		WithPreemptionExpectations(preemptionExpectations),
-		WithWorkloadCustomLabels(customLabels),
-		WithWorkloadLocalQueueMetrics(lqMetrics),
 	)
 	if features.Enabled(features.DynamicResourceAllocation) {
 		qManager.SetDRAReconcileChannel(workloadRec.GetDRAReconcileChannel())
@@ -109,7 +100,6 @@ func SetupControllers(mgr ctrl.Manager, qManager *qcache.Manager, cc *schdcache.
 	}
 	qManager.AddTopologyUpdateWatcher(cqRec)
 	qManager.AddWorkloadUpdateWatcher(qRec)
-
 	return "", nil
 }
 

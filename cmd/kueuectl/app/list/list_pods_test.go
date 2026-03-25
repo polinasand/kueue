@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +41,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericiooptions"
 	"k8s.io/cli-runtime/pkg/resource"
 	restfake "k8s.io/client-go/rest/fake"
+	"k8s.io/utils/strings/slices"
 	jobsetapi "sigs.k8s.io/jobset/api/jobset/v1alpha2"
 
 	kueuecmdtesting "sigs.k8s.io/kueue/cmd/kueuectl/app/testing"

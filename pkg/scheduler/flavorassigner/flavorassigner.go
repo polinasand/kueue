@@ -21,6 +21,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -52,9 +53,7 @@ type Assignment struct {
 	LastState workload.AssignmentClusterQueueState
 
 	// Usage is the accumulated Usage of resources as pod sets get
-	// flavors assigned. When workload slicing is enabled and replaceWorkloadSlice
-	// is set, this represents only the delta usage (new - old) to avoid double-counting
-	// resources already reserved in the replaced slice.
+	// flavors assigned.
 	Usage workload.Usage
 
 	// representativeMode is the cached representative mode for this assignment.
@@ -73,7 +72,7 @@ type Assignment struct {
 }
 
 // UpdateForTASResult updates the Assignment with the TAS result
-func (a *Assignment) UpdateForTASResult(cq *schdcache.ClusterQueueSnapshot, result schdcache.TASAssignmentsResult) {
+func (a *Assignment) UpdateForTASResult(result schdcache.TASAssignmentsResult) {
 	for psName, psResult := range result {
 		psAssignment := a.podSetAssignmentByName(psName)
 		psAssignment.TopologyAssignment = psResult.TopologyAssignment
@@ -81,32 +80,19 @@ func (a *Assignment) UpdateForTASResult(cq *schdcache.ClusterQueueSnapshot, resu
 			psAssignment.DelayedTopologyRequest = ptr.To(kueue.DelayedTopologyRequestStateReady)
 		}
 	}
-	a.Usage.TAS = a.ComputeTASNetUsage(cq, nil)
+	a.Usage.TAS = a.ComputeTASNetUsage(nil)
 }
 
 // ComputeTASNetUsage computes the net TAS usage for the assignment
-func (a *Assignment) ComputeTASNetUsage(cq *schdcache.ClusterQueueSnapshot, prevAdmission *kueue.Admission) workload.TASUsage {
+func (a *Assignment) ComputeTASNetUsage(prevAdmission *kueue.Admission) workload.TASUsage {
 	result := make(workload.TASUsage)
 	for i, psa := range a.PodSets {
 		if psa.TopologyAssignment != nil {
 			if prevAdmission != nil && prevAdmission.PodSetAssignments[i].TopologyAssignment != nil {
 				continue
 			}
-			tasRequests := make(corev1.ResourceList, len(psa.Requests))
-			for resourceName, quantity := range psa.Requests {
-				flv := psa.Flavors[resourceName]
-				if flv == nil || cq.TASFlavors[flv.Name] == nil {
-					// This is the quota-only resources, skip when computing TAS usage.
-					continue
-				}
-				tasRequests[resourceName] = quantity
-			}
-			singlePodRequests := resources.NewRequests(tasRequests).ScaledDown(int64(psa.Count))
+			singlePodRequests := resources.NewRequests(psa.Requests).ScaledDown(int64(psa.Count))
 			for _, flv := range psa.Flavors {
-				if cq.TASFlavors[flv.Name] == nil {
-					// This is a quota-only flavor, skip when computing TAS usage.
-					continue
-				}
 				if _, ok := result[flv.Name]; !ok {
 					result[flv.Name] = make(workload.TASFlavorUsage, 0)
 				}
@@ -123,16 +109,9 @@ func (a *Assignment) ComputeTASNetUsage(cq *schdcache.ClusterQueueSnapshot, prev
 	return result
 }
 
-// Borrows returns the borrowing level of the assignment.
-// It equals 0 if no borrowing is required.
+// Borrows return whether assignment requires borrowing.
 func (a *Assignment) Borrows() int {
 	return a.Borrowing
-}
-
-// RequiresBorrowing returns whether the assignment requires borrowing
-// at any level.
-func (a *Assignment) RequiresBorrowing() bool {
-	return a.Borrowing > 0
 }
 
 func (a *Assignment) podSetAssignmentByName(psName kueue.PodSetReference) *PodSetAssignment {
@@ -205,13 +184,12 @@ func (a *Assignment) TotalRequestsFor(wl *workload.Info) resources.FlavorResourc
 		ps = *ps.ScaledTo(newCount)
 
 		for res, q := range ps.Requests {
-			// zero-quantity request may have no flavor (#8079), and is irrelevant for
-			// later calculations
-			if q == 0 {
+			flv := a.PodSets[i].Flavors[res]
+			if flv == nil {
+				// Resource has no flavor assigned (e.g., zero-quantity request for resource not in CQ).
 				continue
 			}
-			flv := a.PodSets[i].Flavors[res].Name
-			usage[resources.FlavorResource{Flavor: flv, Resource: res}] += q
+			usage[resources.FlavorResource{Flavor: flv.Name, Resource: res}] += q
 		}
 	}
 	return usage
@@ -248,7 +226,7 @@ func (s *Status) Message() string {
 	if s.err != nil {
 		return s.err.Error()
 	}
-	slices.Sort(s.reasons)
+	sort.Strings(s.reasons)
 	return strings.Join(s.reasons, ", ")
 }
 
@@ -277,10 +255,6 @@ type PodSetAssignment struct {
 func (psa *PodSetAssignment) RepresentativeMode() FlavorAssignmentMode {
 	if psa.Status.IsFit() {
 		return Fit
-	}
-	if psa.Status.IsError() {
-		// e.g. onlyTASFlavor failed in WorkloadsTopologyRequests, or TAS request build failed
-		return NoFit
 	}
 	if len(psa.Flavors) == 0 {
 		return NoFit
@@ -431,9 +405,9 @@ func isPreferred(a, b granularMode, fungibilityConfig kueue.FlavorFungibility) b
 	if fungibilityConfig.Preference != nil {
 		switch *fungibilityConfig.Preference {
 		case kueue.BorrowingOverPreemption:
-			return borrowingOverPreemption()
-		case kueue.PreemptionOverBorrowing:
 			return preemptionOverBorrowing()
+		case kueue.PreemptionOverBorrowing:
+			return borrowingOverPreemption()
 		}
 	}
 
@@ -637,7 +611,7 @@ func (a *FlavorAssigner) assignFlavors(log logr.Logger, counts []int32) Assignme
 		}
 		var groupStatus Status
 		for resName, quantity := range requests {
-			// Skip zero-quantity requests for resources not defined in the ClusterQueue (#8079).
+			// Skip zero-quantity requests for resources not defined in the ClusterQueue.
 			if quantity == 0 && a.cq.RGByResource(resName) == nil {
 				continue
 			}
@@ -695,7 +669,7 @@ func (a *FlavorAssigner) assignFlavors(log logr.Logger, counts []int32) Assignme
 				assignment.representativeMode = ptr.To(Preempt)
 			} else {
 				// All PodSets fit, we just update the TopologyAssignments
-				assignment.UpdateForTASResult(a.cq, result)
+				assignment.UpdateForTASResult(result)
 			}
 		}
 		if assignment.RepresentativeMode() == Preempt && !workload.HasUnhealthyNodes(a.wl.Obj) {
@@ -722,35 +696,10 @@ func (a *Assignment) append(requests resources.Requests, psAssignment *PodSetAss
 			a.Borrowing = flvAssignment.borrow
 		}
 		fr := resources.FlavorResource{Flavor: flvAssignment.Name, Resource: resource}
-
-		// For workload slicing, only add the delta (new - old) to avoid double-counting
-		// podSets that already have quota reserved in the old slice.
-		requestAmount := requests[resource]
-		if features.Enabled(features.ElasticJobsViaWorkloadSlices) && a.replaceWorkloadSlice != nil {
-			oldRequest := a.findOldPodSetRequest(psAssignment.Name, resource)
-			requestAmount -= oldRequest
-		}
-
-		a.Usage.Quota[fr] += requestAmount
+		a.Usage.Quota[fr] += requests[resource]
 		flavorIdx[resource] = flvAssignment.TriedFlavorIdx
 	}
 	a.LastState.LastTriedFlavorIdx = append(a.LastState.LastTriedFlavorIdx, flavorIdx)
-}
-
-// findOldPodSetRequest returns the resource request from the old workload slice
-// for the given podSet name and resource. Returns 0 if not found.
-func (a *Assignment) findOldPodSetRequest(psName kueue.PodSetReference, resource corev1.ResourceName) int64 {
-	if a.replaceWorkloadSlice == nil {
-		return 0
-	}
-
-	for _, oldPS := range a.replaceWorkloadSlice.TotalRequests {
-		if oldPS.Name == psName {
-			return oldPS.Requests[resource]
-		}
-	}
-
-	return 0
 }
 
 // findFlavorForPodSets finds the flavor which can satisfy all the PodSet requests
@@ -795,11 +744,15 @@ func (a *FlavorAssigner) findFlavorForPodSets(
 		attemptedFlavorIdx = idx
 		fName := resourceGroup.Flavors[idx]
 
-		if flavorStatus := a.checkFlavorForPodSets(log, fName, psIDs, podSets, selectors, resourceGroup); !flavorStatus.IsFit() {
-			status.reasons = append(status.reasons, flavorStatus.reasons...)
+		flavorStatus := NewStatus()
+
+		if fit, err := a.checkFlavorForPodSets(log, fName, psIDs, podSets, selectors, flavorStatus); !fit {
+			if flavorStatus != nil {
+				status.reasons = append(status.reasons, flavorStatus.reasons...)
+			}
 			consideredFlavors.AddNoFitFlavorAttempt(fName, flavorStatus)
-			if flavorStatus.err != nil {
-				status.err = flavorStatus.err
+			if err != nil {
+				status.err = err
 				return nil, status, consideredFlavors
 			}
 			continue
@@ -902,24 +855,22 @@ func (a *FlavorAssigner) checkFlavorForPodSets(
 	psIDs []int,
 	podSets []*kueue.PodSet,
 	selectors []nodeaffinity.RequiredNodeAffinity,
-	rg *schdcache.ResourceGroup,
-) *Status {
-	status := NewStatus()
-
+	status *Status,
+) (bool, error) {
 	flavor, exist := a.resourceFlavors[flavorName]
 	if !exist {
 		log.Error(nil, "Flavor not found", "Flavor", flavorName)
 		status.appendf("flavor %s not found", flavorName)
-		return status
+		return false, nil
 	}
 
 	for psIdx, psID := range psIDs {
 		if features.Enabled(features.TopologyAwareScheduling) {
 			ps := &a.wl.Obj.Spec.PodSets[psID]
-			if message := checkPodSetAndFlavorMatchForTAS(a.cq, ps, flavor, rg); message != nil {
+			if message := checkPodSetAndFlavorMatchForTAS(a.cq, ps, flavor); message != nil {
 				log.Error(nil, *message)
 				status.appendf("%s", *message)
-				return status
+				return false, nil
 			}
 		}
 		podSpec := podSets[psIdx].Template.Spec
@@ -928,19 +879,19 @@ func (a *FlavorAssigner) checkFlavorForPodSets(
 		}, true)
 		if untolerated {
 			status.appendf("untolerated taint %s in flavor %s", taint, flavorName)
-			return status
+			return false, nil
 		}
 		selector := selectors[psIdx]
 		if match, err := selector.Match(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Labels: flavor.Spec.NodeLabels}}); !match || err != nil {
 			if err != nil {
 				status.err = err
-				return status
+				return false, err
 			}
 			status.appendf("flavor %s doesn't match node affinity", flavorName)
-			return status
+			return false, nil
 		}
 	}
-	return status
+	return true, nil
 }
 
 func shouldTryNextFlavor(representativeMode granularMode, flavorFungibility kueue.FlavorFungibility) bool {

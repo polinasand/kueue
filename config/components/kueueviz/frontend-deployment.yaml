@@ -14,10 +14,6 @@ spec:
       labels:
         app: kueueviz-frontend
     spec:
-      volumes:
-        - name: env-config
-          configMap:
-            name: kueueviz-frontend-env
       containers:
         - name: frontend
           image: frontend:lastest
@@ -31,8 +27,3 @@ spec:
             requests:
               cpu: 500m
               memory: 512Mi
-          volumeMounts:
-            - name: env-config
-              mountPath: /app/build/env.js
-              subPath: env.js
-              readOnly: true

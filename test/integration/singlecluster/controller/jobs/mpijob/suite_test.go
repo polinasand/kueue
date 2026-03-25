@@ -38,7 +38,6 @@ import (
 	"sigs.k8s.io/kueue/pkg/controller/tas"
 	tasindexer "sigs.k8s.io/kueue/pkg/controller/tas/indexer"
 	"sigs.k8s.io/kueue/pkg/scheduler"
-	preemptexpectations "sigs.k8s.io/kueue/pkg/scheduler/preemption/expectations"
 	"sigs.k8s.io/kueue/pkg/webhooks"
 	"sigs.k8s.io/kueue/test/integration/framework"
 	"sigs.k8s.io/kueue/test/util"
@@ -90,7 +89,7 @@ func managerAndSchedulerSetup(setupTASControllers bool, opts ...jobframework.Opt
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		}
 
-		sched := scheduler.New(queues, cCache, mgr.GetClient(), mgr.GetEventRecorderFor(constants.AdmissionName), scheduler.WithPreemptionExpectations(preemptexpectations.New()))
+		sched := scheduler.New(queues, cCache, mgr.GetClient(), mgr.GetEventRecorderFor(constants.AdmissionName))
 		err := sched.Start(ctx)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	}
@@ -100,7 +99,7 @@ func controllersSetup(
 	ctx context.Context, mgr manager.Manager, setupJobManager bool, opts ...jobframework.Option,
 ) (*schdcache.Cache, *qcache.Manager, *config.Configuration) {
 	cCache := schdcache.New(mgr.GetClient())
-	queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache)
+	queues := qcache.NewManager(mgr.GetClient(), cCache)
 	opts = append(opts, jobframework.WithCache(cCache), jobframework.WithQueues(queues))
 
 	reconciler, err := mpijob.NewReconciler(
@@ -121,7 +120,7 @@ func controllersSetup(
 	jobframework.EnableIntegration(mpijob.FrameworkName)
 	configuration := &config.Configuration{}
 	mgr.GetScheme().Default(configuration)
-	failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil, preemptexpectations.New(), nil)
+	failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred(), "controller", failedCtrl)
 	failedWebhook, err := webhooks.Setup(mgr, nil)
 	gomega.Expect(err).ToNot(gomega.HaveOccurred(), "webhook", failedWebhook)

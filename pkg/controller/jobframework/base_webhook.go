@@ -19,34 +19,31 @@ package jobframework
 import (
 	"context"
 
-	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
-	"sigs.k8s.io/kueue/pkg/util/roletracker"
-	"sigs.k8s.io/kueue/pkg/util/webhook"
+	"sigs.k8s.io/kueue/pkg/controller/jobframework/webhook"
 )
 
 // BaseWebhook applies basic defaulting and validation for jobs.
-type BaseWebhook[T any] struct {
+type BaseWebhook struct {
 	Client                       client.Client
 	ManageJobsWithoutQueueName   bool
 	ManagedJobsNamespaceSelector labels.Selector
-	FromObject                   func(T) GenericJob
+	FromObject                   func(runtime.Object) GenericJob
 	Queues                       *qcache.Manager
 	Cache                        *schdcache.Cache
 }
 
-func BaseWebhookFactory[T runtime.Object](obj T, fromObject func(T) GenericJob) func(ctrl.Manager, ...Option) error {
+func BaseWebhookFactory(job GenericJob, fromObject func(runtime.Object) GenericJob) func(ctrl.Manager, ...Option) error {
 	return func(mgr ctrl.Manager, opts ...Option) error {
 		options := ProcessOptions(opts...)
-		wh := &BaseWebhook[T]{
+		wh := &BaseWebhook{
 			Client:                       mgr.GetClient(),
 			ManageJobsWithoutQueueName:   options.ManageJobsWithoutQueueName,
 			ManagedJobsNamespaceSelector: options.ManagedJobsNamespaceSelector,
@@ -54,19 +51,19 @@ func BaseWebhookFactory[T runtime.Object](obj T, fromObject func(T) GenericJob) 
 			Queues:                       options.Queues,
 			Cache:                        options.Cache,
 		}
-		if options.NoopWebhook {
-			return webhook.SetupNoopWebhook(mgr, obj)
-		}
-		return ctrl.NewWebhookManagedBy(mgr, obj).
-			WithDefaulter(wh).
+		return webhook.WebhookManagedBy(mgr).
+			For(job.Object()).
+			WithMutationHandler(admission.WithCustomDefaulter(mgr.GetScheme(), job.Object(), wh)).
 			WithValidator(wh).
-			WithLogConstructor(WebhookLogConstructor(fromObject(obj).GVK(), options.RoleTracker)).
+			WithRoleTracker(options.RoleTracker).
 			Complete()
 	}
 }
 
+var _ admission.CustomDefaulter = &BaseWebhook{}
+
 // Default implements webhook.CustomDefaulter so a webhook will be registered for the type
-func (w *BaseWebhook[T]) Default(ctx context.Context, obj T) error {
+func (w *BaseWebhook) Default(ctx context.Context, obj runtime.Object) error {
 	job := w.FromObject(obj)
 	log := ctrl.LoggerFrom(ctx)
 	log.V(5).Info("Applying defaults")
@@ -78,8 +75,10 @@ func (w *BaseWebhook[T]) Default(ctx context.Context, obj T) error {
 	return nil
 }
 
+var _ admission.CustomValidator = &BaseWebhook{}
+
 // ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type
-func (w *BaseWebhook[T]) ValidateCreate(ctx context.Context, obj T) (admission.Warnings, error) {
+func (w *BaseWebhook) ValidateCreate(ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
 	job := w.FromObject(obj)
 	log := ctrl.LoggerFrom(ctx)
 	log.V(5).Info("Validating create")
@@ -95,7 +94,7 @@ func (w *BaseWebhook[T]) ValidateCreate(ctx context.Context, obj T) (admission.W
 }
 
 // ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type
-func (w *BaseWebhook[T]) ValidateUpdate(ctx context.Context, oldObj, newObj T) (admission.Warnings, error) {
+func (w *BaseWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (admission.Warnings, error) {
 	oldJob := w.FromObject(oldObj)
 	newJob := w.FromObject(newObj)
 	log := ctrl.LoggerFrom(ctx)
@@ -112,14 +111,6 @@ func (w *BaseWebhook[T]) ValidateUpdate(ctx context.Context, oldObj, newObj T) (
 }
 
 // ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type
-func (w *BaseWebhook[T]) ValidateDelete(context.Context, T) (admission.Warnings, error) {
+func (w *BaseWebhook) ValidateDelete(context.Context, runtime.Object) (admission.Warnings, error) {
 	return nil, nil
-}
-
-// WebhookLogConstructor adds group, kind and replicaRole information to the base log.
-func WebhookLogConstructor(gvk schema.GroupVersionKind, roleTracker *roletracker.RoleTracker) func(base logr.Logger, req *admission.Request) logr.Logger {
-	return func(base logr.Logger, req *admission.Request) logr.Logger {
-		rtWebhookLogConstructor := roletracker.WebhookLogConstructor(roleTracker)
-		return rtWebhookLogConstructor(base.WithValues("webhookGroup", gvk.Group, "webhookKind", gvk.Kind), req)
-	}
 }

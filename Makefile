@@ -21,7 +21,7 @@ endif
 
 GO_CMD ?= go
 # Use go.mod go version as a single source of truth of GO version.
-GO_VERSION := $(shell awk '/^go /{split($$2, v, "."); print v[1] "." v[2]}' go.mod|head -n1)
+GO_VERSION := $(shell awk '/^go /{print $$2}' go.mod|head -n1)
 
 GIT_TAG ?= $(shell git describe --tags --dirty --always)
 GIT_COMMIT ?= $(shell git rev-parse HEAD)
@@ -54,7 +54,7 @@ CLUSTERPROFILE_PLUGIN_IMAGE_VERSION ?= 0.0.1
 PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
 BIN_DIR ?= $(PROJECT_DIR)/bin
 ARTIFACTS ?= $(BIN_DIR)
-TOOLS_DIR := $(PROJECT_DIR)/hack/tools
+TOOLS_DIR := $(PROJECT_DIR)/hack/internal/tools
 MOCKS_DIR := internal/mocks
 
 # Use distroless as minimal base image to package the manager binary
@@ -90,7 +90,7 @@ LD_FLAGS += -X '$(version_pkg).BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)'
 
 # Update these variables when preparing a new release or a release branch.
 # Then run `make prepare-release-branch`
-RELEASE_VERSION=v0.16.4
+RELEASE_VERSION=v0.16.1
 RELEASE_BRANCH=main
 # Application version for Helm and npm (strips leading 'v' from RELEASE_VERSION)
 APP_VERSION := $(shell echo $(RELEASE_VERSION) | cut -c2-)
@@ -121,14 +121,12 @@ include Makefile-test.mk
 
 include Makefile-kueue-populator.mk
 
-# Repo-wide verification is defined in a separate fragment so it can be read/maintained
-# independently of build/test logic. See `Makefile-verify.mk` for what `make verify` runs.
 include Makefile-verify.mk
 
 ##@ Development
 
 .PHONY: manifests
-manifests: controller-gen generate-code ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
+manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) \
 		crd:generateEmbeddedObjectMeta=true output:crd:artifacts:config=config/components/crd/bases\
 		paths="./apis/..."
@@ -136,23 +134,24 @@ manifests: controller-gen generate-code ## Generate WebhookConfiguration, Cluste
 		rbac:roleName=manager-role output:rbac:artifacts:config=config/components/rbac\
 		webhook output:webhook:artifacts:config=config/components/webhook\
 		paths="./pkg/controller/...;./pkg/webhooks/...;./pkg/util/cert/...;./pkg/visibility/..."
+	$(MAKE) compile-crd-manifests
 
 .PHONY: compile-crd-manifests
-compile-crd-manifests: manifests kustomize
+compile-crd-manifests: kustomize
 	@mkdir -p config/components/crd/_output
 	$(KUSTOMIZE) build config/components/crd > config/components/crd/_output/crds-with-webhooks.yaml
 
 .PHONY: update-helm
-update-helm: compile-crd-manifests yq yaml-processor
-	$(YAML_PROCESSOR) -zap-log-level=$(YAML_PROCESSOR_LOG_LEVEL) hack/processing-plan.yaml
+update-helm: manifests yq yaml-processor
+	$(BIN_DIR)/yaml-processor -zap-log-level=$(YAML_PROCESSOR_LOG_LEVEL) hack/processing-plan.yaml
 
 .PHONY: generate
-generate: generate-mocks generate-apiref generate-code generate-kueuectl-docs generate-helm-docs generate-metrics-tables generate-featuregates
+generate: gomod-download generate-mocks generate-apiref generate-code generate-kueuectl-docs generate-helm-docs generate-metrics-tables generate-featuregates
 
 .PHONY: generate-code
 generate-code: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations and client-go libraries.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./apis/..."
-	$(TOOLS_DIR)/code-generator/generate.sh $(GO_CMD)
+	TOOLS_DIR=${TOOLS_DIR} ./hack/update-codegen.sh $(GO_CMD)
 
 .PHONY: generate-mocks
 generate-mocks: mockgen ## Generate mockgen mocks
@@ -162,29 +161,23 @@ generate-mocks: mockgen ## Generate mockgen mocks
 		-destination=$(MOCKS_DIR)/controller/jobframework/interface.go \
 		-copyright_file hack/boilerplate.txt \
 		-package mocks \
-		sigs.k8s.io/kueue/pkg/controller/jobframework GenericJob,JobWithCustomValidation,JobWithManagedBy,JobWithCustomWorkloadActivation,JobWithCustomAnnotations
+		sigs.k8s.io/kueue/pkg/controller/jobframework GenericJob,JobWithCustomValidation,JobWithManagedBy,JobWithCustomWorkloadActivation
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
 	$(GO_CMD) fmt ./...
 
 .PHONY: gomod-download
-gomod-download: ## Download Go module dependencies (main)
-	@echo "→ Downloading main dependencies..."
+gomod-download:
 	$(GO_CMD) mod download
-
-.PHONY: gomod-download-tools
-gomod-download-tools: ## Download Go module dependencies (tools)
-	@echo "→ Downloading tools dependencies..."
-	cd $(TOOLS_DIR) && $(GO_CMD) mod download
 
 .PHONY: toc-update
 toc-update: mdtoc
-	$(TOOLS_DIR)/mdtoc/generate.sh
+	./hack/update-toc.sh
 
 .PHONY: helm-lint
 helm-lint: helm ## Run Helm chart lint test.
-	$(HELM) lint charts/kueue
+	${HELM} lint charts/kueue
 
 .PHONY: vet
 vet: ## Run go vet against code.
@@ -201,7 +194,7 @@ build:
 	$(GO_BUILD_ENV) $(GO_CMD) build -ldflags="$(LD_FLAGS)" -o bin/manager cmd/kueue/main.go
 
 .PHONY: run
-run: compile-crd-manifests generate fmt vet ## Run a controller from your host.
+run: manifests generate fmt vet ## Run a controller from your host.
 	$(GO_CMD) run cmd/kueue/main.go
 
 # Build the multiplatform container image locally.
@@ -252,17 +245,15 @@ kind-image-build: PLATFORMS=$(HOST_IMAGE_PLATFORM)
 kind-image-build: PUSH=--load
 kind-image-build: kind image-build
 
-YAML_PROCESSOR = $(BIN_DIR)/yaml-processor
 .PHONY: yaml-processor
 yaml-processor:
 	cd $(TOOLS_DIR)/yaml-processor && \
-	$(GO_BUILD_ENV) $(GO_CMD) build -ldflags="$(LD_FLAGS)" -o $(YAML_PROCESSOR)
+	$(GO_BUILD_ENV) $(GO_CMD) build -ldflags="$(LD_FLAGS)" -o $(BIN_DIR)/yaml-processor
 
-METRICSDOC = $(BIN_DIR)/metricsdoc
 .PHONY: metricsdoc
 metricsdoc:
 	cd $(TOOLS_DIR)/metricsdoc && \
-	$(GO_BUILD_ENV) $(GO_CMD) build -ldflags="$(LD_FLAGS)" -o $(METRICSDOC)
+	$(GO_BUILD_ENV) $(GO_CMD) build -ldflags="$(LD_FLAGS)" -o $(BIN_DIR)/metricsdoc
 
 ##@ Deployment
 
@@ -280,15 +271,15 @@ clean-manifests = \
     	$(KUSTOMIZE) edit set image controller=$(STAGING_IMAGE_REGISTRY)/kueue-populator:$(RELEASE_BRANCH))
 
 .PHONY: install
-install: compile-crd-manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
+install: manifests kustomize ## Install CRDs into the K8s cluster specified in ~/.kube/config.
 	$(KUSTOMIZE) build config/components/crd | kubectl apply --server-side -f -
 
 .PHONY: uninstall
-uninstall: compile-crd-manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
+uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/components/crd | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
 
 .PHONY: deploy
-deploy: compile-crd-manifests kustomize prepare-manifests ## Deploy controller to the K8s cluster specified in ~/.kube/config.
+deploy: manifests kustomize prepare-manifests ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	kubectl apply --server-side -k config/default
 	@$(call clean-manifests)
 
@@ -464,12 +455,12 @@ generate-apiref: genref
 
 .PHONY: generate-featuregates
 generate-featuregates: ## Regenerate feature-gate YAML and site data.
-	$(TOOLS_DIR)/compatibility-lifecycle/generate.sh
+	$(PROJECT_DIR)/hack/update-featuregates.sh
 
 .PHONY: generate-kueuectl-docs
 generate-kueuectl-docs: kueuectl-docs
 	rm -Rf $(PROJECT_DIR)/site/content/en/docs/reference/kubectl-kueue/commands/kueuectl*
-	$(KUEUECTL_DOCS) \
+	$(BIN_DIR)/kueuectl-docs \
 		$(PROJECT_DIR)/cmd/kueuectl-docs/templates \
 		$(PROJECT_DIR)/site/content/en/docs/reference/kubectl-kueue/commands
 
@@ -479,7 +470,7 @@ generate-helm-docs: helm-docs
 
 .PHONY: generate-metrics-tables
 generate-metrics-tables: metricsdoc
-	$(METRICSDOC) --metrics-package=pkg/metrics --out=site/content/en/docs/reference/metrics.md
+	$(BIN_DIR)/metricsdoc --metrics-package=pkg/metrics --out=site/content/en/docs/reference/metrics.md
 
 # Build the ray-project-mini image
 .PHONY: ray-project-mini-image-build
@@ -491,7 +482,7 @@ ray-project-mini-image-build:
 		--build-arg RAY_VERSION=$(RAY_VERSION) \
 		$(PUSH) \
 		$(IMAGE_BUILD_EXTRA_OPTS) \
-		-f ./hack/testing/ray/Dockerfile ./ \
+		-f ./hack/internal/test-images/ray/Dockerfile ./ \
 
 # The step is required for local e2e test run
 .PHONY: kind-ray-project-mini-image-build
@@ -507,7 +498,7 @@ secretreader-plugin-image-build:
 		--platform=$(PLATFORMS) \
 		--build-arg PLUGIN_VERSION=$(CLUSTERPROFILE_VERSION) \
 		$(PUSH) \
-		-f hack/testing/secretreader/Dockerfile ./ \
+		-f hack/multikueue/secretreader/Dockerfile ./ \
 
 # The step is required for local e2e test run
 .PHONY: kind-secretreader-plugin-image-build

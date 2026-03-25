@@ -251,7 +251,7 @@ func TestWorkloadPriorityClassReconcile(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			ctx := t.Context()
+			ctx := context.Background()
 
 			builder := utiltesting.NewClientBuilder().
 				WithObjects(tc.wpc).

@@ -18,43 +18,56 @@ package handlers
 
 import (
 	"context"
+	"sort"
 
 	"github.com/gin-gonic/gin"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	kueueapi "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 )
 
 // NamespacesWebSocketHandler streams namespaces that are related to Kueue
 func (h *Handlers) NamespacesWebSocketHandler() gin.HandlerFunc {
-	// Use LocalQueue informer since namespaces are derived from LocalQueues
 	return h.GenericWebSocketHandler(func(ctx context.Context) (any, error) {
 		return h.fetchNamespaces(ctx)
-	}, LocalQueuesGVK())
+	})
 }
 
 // Fetch namespaces that have LocalQueues (Kueue-related namespaces)
 func (h *Handlers) fetchNamespaces(ctx context.Context) (any, error) {
-	lql := &kueueapi.LocalQueueList{}
+	l := &kueueapi.LocalQueueList{}
 
 	// First, get all LocalQueues to find namespaces that have them
-	err := h.client.List(ctx, lql)
+	err := h.client.List(ctx, l)
 	if err != nil {
 		return nil, err
 	}
 
 	// Extract unique namespaces from LocalQueues
-	namespaceSet := sets.NewString()
-	for _, lq := range lql.Items {
-		namespaceSet.Insert(lq.GetNamespace())
+	namespaceSet := make(map[string]struct{})
+	for _, lq := range l.Items {
+		namespaceSet[lq.GetNamespace()] = struct{}{}
 	}
 
-	namespaces := namespaceSet.List()
-	if namespaceSet.Len() == 0 {
-		namespaces = []string{}
+	// If no LocalQueues found, return empty result with proper structure
+	if len(namespaceSet) == 0 {
+		return map[string]any{
+			"namespaces": []string{},
+		}, nil
 	}
 
-	return map[string]any{
-		"namespaces": namespaces,
-	}, nil
+	// Convert namespace set to a slice of strings (just the names)
+	var namespaceNames []string
+	for namespaceName := range namespaceSet {
+		namespaceNames = append(namespaceNames, namespaceName)
+	}
+
+	// Sort namespaces alphabetically for consistent ordering
+	sort.Strings(namespaceNames)
+
+	// Return in the same format as other endpoints
+	result := map[string]any{
+		"namespaces": namespaceNames,
+	}
+
+	return result, nil
 }

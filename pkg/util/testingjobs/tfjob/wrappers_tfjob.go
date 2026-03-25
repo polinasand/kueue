@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package tfjob
+package testing
 
 import (
 	kftraining "github.com/kubeflow/training-operator/pkg/apis/kubeflow.org/v1"
@@ -203,6 +203,12 @@ func (j *TFJobWrapper) UID(uid string) *TFJobWrapper {
 // StatusConditions adds a condition.
 func (j *TFJobWrapper) StatusConditions(c kftraining.JobCondition) *TFJobWrapper {
 	j.Status.Conditions = append(j.Status.Conditions, c)
+	return j
+}
+
+func (j *TFJobWrapper) Image(replicaType kftraining.ReplicaType, image string, args []string) *TFJobWrapper {
+	j.Spec.TFReplicaSpecs[replicaType].Template.Spec.Containers[0].Image = image
+	j.Spec.TFReplicaSpecs[replicaType].Template.Spec.Containers[0].Args = args
 	return j
 }
 

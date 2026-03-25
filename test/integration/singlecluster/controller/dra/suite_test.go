@@ -29,13 +29,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	config "sigs.k8s.io/kueue/apis/config/v1beta2"
+	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/controller/core"
 	"sigs.k8s.io/kueue/pkg/controller/core/indexer"
 	"sigs.k8s.io/kueue/pkg/dra"
 	"sigs.k8s.io/kueue/pkg/features"
 	"sigs.k8s.io/kueue/pkg/scheduler"
-	preemptexpectations "sigs.k8s.io/kueue/pkg/scheduler/preemption/expectations"
 	"sigs.k8s.io/kueue/pkg/webhooks"
 	"sigs.k8s.io/kueue/test/integration/framework"
 	"sigs.k8s.io/kueue/test/util"
@@ -63,7 +63,6 @@ var _ = ginkgo.BeforeSuite(func() {
 		WebhookPath: util.WebhookPath,
 		APIServerFeatureGates: []string{
 			"DynamicResourceAllocation=true",
-			"DRAExtendedResource=true",
 		},
 		APIServerRuntimeConfig: []string{
 			"resource.k8s.io/v1beta2=true",
@@ -123,11 +122,10 @@ func managerSetup(modifyConfig func(*config.Configuration)) framework.ManagerSet
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 		cCache := schdcache.New(mgr.GetClient())
-		queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache)
+		queues := qcache.NewManager(mgr.GetClient(), cCache)
 
 		// Core controllers
-		preemptionExpectations := preemptexpectations.New()
-		failedCtrl, err := core.SetupControllers(mgr, queues, cCache, controllersCfg, nil, preemptionExpectations, nil)
+		failedCtrl, err := core.SetupControllers(mgr, queues, cCache, controllersCfg, nil)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred(), "controller", failedCtrl)
 
 		// Scheduler - required for workload admission
@@ -136,7 +134,6 @@ func managerSetup(modifyConfig func(*config.Configuration)) framework.ManagerSet
 			cCache,
 			mgr.GetClient(),
 			mgr.GetEventRecorderFor("kueue-admission"),
-			scheduler.WithPreemptionExpectations(preemptionExpectations),
 		)
 		err = mgr.Add(sched)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

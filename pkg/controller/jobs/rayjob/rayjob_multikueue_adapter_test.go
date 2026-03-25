@@ -31,8 +31,6 @@ import (
 
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/controller/constants"
-	"sigs.k8s.io/kueue/pkg/controller/jobframework"
-	"sigs.k8s.io/kueue/pkg/controller/jobs/ray"
 	"sigs.k8s.io/kueue/pkg/util/slices"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
 	utiltestingrayjob "sigs.k8s.io/kueue/pkg/util/testingjobs/rayjob"
@@ -54,7 +52,7 @@ func TestMultiKueueAdapter(t *testing.T) {
 		managersRayJobs []rayv1.RayJob
 		workerRayJobs   []rayv1.RayJob
 
-		operation func(ctx context.Context, adapter jobframework.MultiKueueAdapter, managerClient, workerClient client.Client) error
+		operation func(ctx context.Context, adapter *multiKueueAdapter, managerClient, workerClient client.Client) error
 
 		wantError           error
 		wantManagersRayJobs []rayv1.RayJob
@@ -64,7 +62,7 @@ func TestMultiKueueAdapter(t *testing.T) {
 			managersRayJobs: []rayv1.RayJob{
 				*rayJobBuilder.DeepCopy(),
 			},
-			operation: func(ctx context.Context, adapter jobframework.MultiKueueAdapter, managerClient, workerClient client.Client) error {
+			operation: func(ctx context.Context, adapter *multiKueueAdapter, managerClient, workerClient client.Client) error {
 				return adapter.SyncJob(ctx, managerClient, workerClient, types.NamespacedName{Name: "rayjob1", Namespace: TestNamespace}, "wl1", "origin1")
 			},
 
@@ -89,7 +87,7 @@ func TestMultiKueueAdapter(t *testing.T) {
 					JobDeploymentStatus(rayv1.JobDeploymentStatusComplete).
 					Obj(),
 			},
-			operation: func(ctx context.Context, adapter jobframework.MultiKueueAdapter, managerClient, workerClient client.Client) error {
+			operation: func(ctx context.Context, adapter *multiKueueAdapter, managerClient, workerClient client.Client) error {
 				return adapter.SyncJob(ctx, managerClient, workerClient, types.NamespacedName{Name: "rayjob1", Namespace: TestNamespace}, "wl1", "origin1")
 			},
 
@@ -120,7 +118,7 @@ func TestMultiKueueAdapter(t *testing.T) {
 					JobDeploymentStatus(rayv1.JobDeploymentStatusComplete).
 					Obj(),
 			},
-			operation: func(ctx context.Context, adapter jobframework.MultiKueueAdapter, managerClient, workerClient client.Client) error {
+			operation: func(ctx context.Context, adapter *multiKueueAdapter, managerClient, workerClient client.Client) error {
 				return adapter.SyncJob(ctx, managerClient, workerClient, types.NamespacedName{Name: "rayjob1", Namespace: TestNamespace}, "wl1", "origin1")
 			},
 			wantManagersRayJobs: []rayv1.RayJob{
@@ -145,7 +143,7 @@ func TestMultiKueueAdapter(t *testing.T) {
 					Label(kueue.MultiKueueOriginLabel, "origin1").
 					Obj(),
 			},
-			operation: func(ctx context.Context, adapter jobframework.MultiKueueAdapter, managerClient, workerClient client.Client) error {
+			operation: func(ctx context.Context, adapter *multiKueueAdapter, managerClient, workerClient client.Client) error {
 				return adapter.DeleteRemoteObject(ctx, workerClient, types.NamespacedName{Name: "rayjob1", Namespace: TestNamespace})
 			},
 		},
@@ -155,7 +153,7 @@ func TestMultiKueueAdapter(t *testing.T) {
 					ManagedBy("some-other-controller").
 					Obj(),
 			},
-			operation: func(ctx context.Context, adapter jobframework.MultiKueueAdapter, managerClient, workerClient client.Client) error {
+			operation: func(ctx context.Context, adapter *multiKueueAdapter, managerClient, workerClient client.Client) error {
 				if isManged, _, _ := adapter.IsJobManagedByKueue(ctx, managerClient, types.NamespacedName{Name: "rayjob1", Namespace: TestNamespace}); isManged {
 					return errors.New("expecting false")
 				}
@@ -174,7 +172,7 @@ func TestMultiKueueAdapter(t *testing.T) {
 					ManagedBy(kueue.MultiKueueControllerName).
 					Obj(),
 			},
-			operation: func(ctx context.Context, adapter jobframework.MultiKueueAdapter, managerClient, workerClient client.Client) error {
+			operation: func(ctx context.Context, adapter *multiKueueAdapter, managerClient, workerClient client.Client) error {
 				if isManged, _, _ := adapter.IsJobManagedByKueue(ctx, managerClient, types.NamespacedName{Name: "rayjob1", Namespace: TestNamespace}); !isManged {
 					return errors.New("expecting true")
 				}
@@ -187,7 +185,7 @@ func TestMultiKueueAdapter(t *testing.T) {
 			},
 		},
 		"missing job is not considered managed": {
-			operation: func(ctx context.Context, adapter jobframework.MultiKueueAdapter, managerClient, workerClient client.Client) error {
+			operation: func(ctx context.Context, adapter *multiKueueAdapter, managerClient, workerClient client.Client) error {
 				if isManged, _, _ := adapter.IsJobManagedByKueue(ctx, managerClient, types.NamespacedName{Name: "rayjob1", Namespace: TestNamespace}); isManged {
 					return errors.New("expecting false")
 				}
@@ -208,7 +206,7 @@ func TestMultiKueueAdapter(t *testing.T) {
 
 			ctx, _ := utiltesting.ContextWithLog(t)
 
-			adapter := ray.NewMKAdapter(copyJobSpec, copyJobStatus, getEmptyList, gvk, getManagedBy, setManagedBy)
+			adapter := &multiKueueAdapter{}
 
 			gotErr := tc.operation(ctx, adapter, managerClient, workerClient)
 

@@ -41,10 +41,11 @@ import (
 
 func TestDefault(t *testing.T) {
 	testcases := map[string]struct {
-		oldJob         *rayv1.RayJob
-		newJob         *rayv1.RayJob
-		manageAll      bool
-		defaultLqExist bool
+		oldJob               *rayv1.RayJob
+		newJob               *rayv1.RayJob
+		manageAll            bool
+		localQueueDefaulting bool
+		defaultLqExist       bool
 	}{
 		"unmanaged": {
 			oldJob: testingrayutil.MakeJob("job", "ns").
@@ -73,23 +74,26 @@ func TestDefault(t *testing.T) {
 				Suspend(true).
 				Obj(),
 		},
-		"default lq is created, job doesn't have queue label": {
-			defaultLqExist: true,
-			oldJob:         testingrayutil.MakeJob("test-job", "default").Obj(),
+		"LocalQueueDefaulting enabled, default lq is created, job doesn't have queue label": {
+			localQueueDefaulting: true,
+			defaultLqExist:       true,
+			oldJob:               testingrayutil.MakeJob("test-job", "default").Obj(),
 			newJob: testingrayutil.MakeJob("test-job", "default").
 				Queue("default").
 				Obj(),
 		},
-		"default lq is created, job has queue label": {
-			defaultLqExist: true,
-			oldJob:         testingrayutil.MakeJob("test-job", "").Queue("test-queue").Obj(),
+		"LocalQueueDefaulting enabled, default lq is created, job has queue label": {
+			localQueueDefaulting: true,
+			defaultLqExist:       true,
+			oldJob:               testingrayutil.MakeJob("test-job", "").Queue("test-queue").Obj(),
 			newJob: testingrayutil.MakeJob("test-job", "").
 				Queue("test-queue").
 				Obj(),
 		},
-		"default lq isn't created, job doesn't have queue label": {
-			defaultLqExist: false,
-			oldJob:         testingrayutil.MakeJob("test-job", "").Obj(),
+		"LocalQueueDefaulting enabled, default lq isn't created, job doesn't have queue label": {
+			localQueueDefaulting: true,
+			defaultLqExist:       false,
+			oldJob:               testingrayutil.MakeJob("test-job", "").Obj(),
 			newJob: testingrayutil.MakeJob("test-job", "").
 				Obj(),
 		},
@@ -97,11 +101,12 @@ func TestDefault(t *testing.T) {
 
 	for name, tc := range testcases {
 		t.Run(name, func(t *testing.T) {
+			features.SetFeatureGateDuringTest(t, features.LocalQueueDefaulting, tc.localQueueDefaulting)
 			ctx, _ := utiltesting.ContextWithLog(t)
 			builder := utiltesting.NewClientBuilder()
 			cli := builder.Build()
 			cqCache := schdcache.New(cli)
-			queueManager := qcache.NewManagerForUnitTests(cli, cqCache)
+			queueManager := qcache.NewManager(cli, cqCache)
 			if tc.defaultLqExist {
 				if err := queueManager.AddLocalQueue(ctx, utiltestingapi.MakeLocalQueue("default", "default").
 					ClusterQueue("cluster-queue").Obj()); err != nil {
@@ -132,6 +137,7 @@ func TestValidateCreate(t *testing.T) {
 		job                          *rayv1.RayJob
 		manageAll                    bool
 		wantErr                      error
+		localQueueDefaulting         bool
 		topologyAwareScheduling      bool
 		elasticJobsViaWorkloadSlices bool
 	}{
@@ -142,6 +148,16 @@ func TestValidateCreate(t *testing.T) {
 			wantErr: nil,
 		},
 
+		"valid managed - has cluster selector but no RayClusterSpec": {
+			job: testingrayutil.MakeJob("job", "ns").Queue("queue").
+				ClusterSelector(map[string]string{
+					"k1": "v1",
+				}).
+				RayClusterSpec(nil).
+				Obj(),
+			localQueueDefaulting: false,
+			wantErr:              nil,
+		},
 		"invalid managed - no cluster selector and no RayClusterSpec": {
 			job: testingrayutil.MakeJob("job", "ns").Queue("queue").
 				RayClusterSpec(nil).
@@ -154,7 +170,8 @@ func TestValidateCreate(t *testing.T) {
 			job: testingrayutil.MakeJob("job", "ns").
 				ShutdownAfterJobFinishes(false).
 				Obj(),
-			wantErr: nil,
+			localQueueDefaulting: true,
+			wantErr:              nil,
 		},
 		"invalid managed - by config": {
 			job: testingrayutil.MakeJob("job", "ns").
@@ -571,6 +588,7 @@ func TestValidateCreate(t *testing.T) {
 			wh := &RayJobWebhook{
 				manageJobsWithoutQueueName: tc.manageAll,
 			}
+			features.SetFeatureGateDuringTest(t, features.LocalQueueDefaulting, tc.localQueueDefaulting)
 			features.SetFeatureGateDuringTest(t, features.TopologyAwareScheduling, tc.topologyAwareScheduling)
 			features.SetFeatureGateDuringTest(t, features.ElasticJobsViaWorkloadSlices, tc.elasticJobsViaWorkloadSlices)
 			ctx, _ := utiltesting.ContextWithLog(t)

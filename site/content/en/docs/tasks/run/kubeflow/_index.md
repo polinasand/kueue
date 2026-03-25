@@ -23,6 +23,3 @@ The tasks below show you how to run Kueue managed Kubeflow Trainer v1 Jobs.
 
 ### [MPI Operator](https://github.com/kubeflow/mpi-operator) Integration
 - [Run a Kueue managed Kubeflow MPIJob](/docs/tasks/run/kubeflow/mpijobs/).
-
-### [Spark Operator](https://github.com/kubeflow/spark-operator) Integration
-- [Run a Kueue managed Kubeflow SparkApplication](/docs/tasks/run/kubeflow/sparkapplications/)

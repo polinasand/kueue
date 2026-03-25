@@ -16,7 +16,6 @@ Add one of the following kinds:
 /kind cleanup
 /kind documentation
 /kind feature
-/kind kep
 
 Optionally add one or more of the following kinds if applicable:
 /kind api-change
@@ -24,14 +23,6 @@ Optionally add one or more of the following kinds if applicable:
 /kind failing-test
 /kind flake
 /kind regression
-
-Please also consider setting the area:
-/area tas
-/area integrations
-/area multikueue
-/area dashboard
-/area localization
-/area testing
 -->
 
 #### What this PR does / why we need it:

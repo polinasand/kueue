@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"sort"
 	"sync"
 	"testing"
 
@@ -206,7 +207,7 @@ func (m *integrationManager) enableIntegration(name string) {
 func (m *integrationManager) getList() []string {
 	ret := make([]string, len(m.names))
 	copy(ret, m.names)
-	slices.Sort(ret)
+	sort.Strings(ret)
 	return ret
 }
 

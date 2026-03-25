@@ -50,7 +50,8 @@ func Setup(mgr ctrl.Manager, roleTracker *roletracker.RoleTracker) (string, erro
 }
 
 func setupWebhookForLocalQueue(mgr ctrl.Manager, roleTracker *roletracker.RoleTracker) error {
-	return ctrl.NewWebhookManagedBy(mgr, &kueue.LocalQueue{}).
+	return ctrl.NewWebhookManagedBy(mgr).
+		For(&kueue.LocalQueue{}).
 		WithLogConstructor(roletracker.WebhookLogConstructor(roleTracker)).
 		Complete()
 }

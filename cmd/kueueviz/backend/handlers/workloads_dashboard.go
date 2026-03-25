@@ -31,7 +31,6 @@ import (
 )
 
 // WorkloadsDashboardWebSocketHandler streams workloads along with attached pod details
-// Watches Workloads, Pods, ClusterQueues, LocalQueues, and ResourceFlavors for comprehensive updates
 func (h *Handlers) WorkloadsDashboardWebSocketHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Extract namespace query parameter if provided
@@ -42,13 +41,7 @@ func (h *Handlers) WorkloadsDashboardWebSocketHandler() gin.HandlerFunc {
 			return h.fetchDashboardData(ctx, namespace)
 		}
 
-		h.GenericWebSocketHandler(dataFetcher,
-			WorkloadsGVK(),
-			PodsGVK(),
-			ClusterQueuesGVK(),
-			LocalQueuesGVK(),
-			ResourceFlavorsGVK(),
-		)(c)
+		h.GenericWebSocketHandler(dataFetcher)(c)
 	}
 }
 
@@ -67,6 +60,7 @@ func (h *Handlers) fetchDashboardData(ctx context.Context, namespace string) (ma
 }
 
 func (h *Handlers) fetchWorkloadsDashboardData(ctx context.Context, namespace string) any {
+	// Filter workloads by namespace if provided, otherwise fetch all
 	wql := &kueueapi.WorkloadList{}
 	err := h.client.List(ctx, wql, ctrlclient.InNamespace(namespace))
 

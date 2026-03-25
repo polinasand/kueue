@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
 	"sigs.k8s.io/kueue/pkg/controller/jobs/job"
@@ -74,7 +75,7 @@ var _ = ginkgo.AfterSuite(func() {
 func managerSetup(setup func(ctrl.Manager, ...jobframework.Option) error, opts ...jobframework.Option) framework.ManagerSetup {
 	return func(ctx context.Context, mgr manager.Manager) {
 		cCache := schdcache.New(mgr.GetClient())
-		queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache)
+		queues := qcache.NewManager(mgr.GetClient(), cCache)
 		opts = append(opts, jobframework.WithCache(cCache), jobframework.WithQueues(queues))
 
 		err := setup(mgr, opts...)

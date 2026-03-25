@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/kueue/pkg/controller/constants"
 	"sigs.k8s.io/kueue/pkg/controller/jobframework"
 	"sigs.k8s.io/kueue/pkg/util/api"
+	clientutil "sigs.k8s.io/kueue/pkg/util/client"
 )
 
 type multiKueueAdapter struct{}
@@ -51,11 +52,12 @@ func (b *multiKueueAdapter) SyncJob(ctx context.Context, localClient client.Clie
 		return err
 	}
 
-	// If the remote exists, skip status sync.
-	// StatefulSet doesn't support managedBy, so the local StatefulSet controller
-	// would immediately overwrite any status we sync from the worker cluster.
+	// if the remote exists, just copy the status
 	if err == nil {
-		return nil
+		return clientutil.PatchStatus(ctx, localClient, &localStatefulSet, func() (bool, error) {
+			localStatefulSet.Status = remoteStatefulSet.Status
+			return true, nil
+		})
 	}
 
 	remoteStatefulSet = appsv1.StatefulSet{
@@ -69,11 +71,6 @@ func (b *multiKueueAdapter) SyncJob(ctx context.Context, localClient client.Clie
 	}
 	remoteStatefulSet.Labels[constants.PrebuiltWorkloadLabel] = workloadName
 	remoteStatefulSet.Labels[kueue.MultiKueueOriginLabel] = origin
-
-	if remoteStatefulSet.Annotations == nil {
-		remoteStatefulSet.Annotations = make(map[string]string, 1)
-	}
-	remoteStatefulSet.Annotations[kueue.MultiKueueOriginUIDAnnotation] = string(localStatefulSet.UID)
 
 	return remoteClient.Create(ctx, &remoteStatefulSet)
 }
@@ -99,16 +96,16 @@ func (*multiKueueAdapter) GetEmptyList() client.ObjectList {
 	return &appsv1.StatefulSetList{}
 }
 
-func (*multiKueueAdapter) WorkloadKeysFor(o runtime.Object) ([]types.NamespacedName, error) {
+func (*multiKueueAdapter) WorkloadKeyFor(o runtime.Object) (types.NamespacedName, error) {
 	statefulSet, isStatefulSet := o.(*appsv1.StatefulSet)
 	if !isStatefulSet {
-		return nil, errors.New("not a statefulset")
+		return types.NamespacedName{}, errors.New("not a statefulset")
 	}
 
 	prebuiltWl, hasPrebuiltWorkload := statefulSet.Labels[constants.PrebuiltWorkloadLabel]
 	if !hasPrebuiltWorkload {
-		return nil, fmt.Errorf("no prebuilt workload found for statefulset: %s", klog.KObj(statefulSet))
+		return types.NamespacedName{}, fmt.Errorf("no prebuilt workload found for statefulset: %s", klog.KObj(statefulSet))
 	}
 
-	return []types.NamespacedName{{Name: prebuiltWl, Namespace: statefulSet.Namespace}}, nil
+	return types.NamespacedName{Name: prebuiltWl, Namespace: statefulSet.Namespace}, nil
 }

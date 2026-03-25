@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -32,10 +31,8 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	qcache "sigs.k8s.io/kueue/pkg/cache/queue"
 	schdcache "sigs.k8s.io/kueue/pkg/cache/scheduler"
-	"sigs.k8s.io/kueue/pkg/metrics"
 	"sigs.k8s.io/kueue/pkg/resources"
 	utiltesting "sigs.k8s.io/kueue/pkg/util/testing"
-	testingmetrics "sigs.k8s.io/kueue/pkg/util/testing/metrics"
 	utiltestingapi "sigs.k8s.io/kueue/pkg/util/testing/v1beta2"
 )
 
@@ -43,7 +40,7 @@ func TestCohortReconcileCohortNotFoundDelete(t *testing.T) {
 	cl := utiltesting.NewClientBuilder().Build()
 	ctx, _ := utiltesting.ContextWithLog(t)
 	cache := schdcache.New(cl)
-	qManager := qcache.NewManagerForUnitTests(cl, cache)
+	qManager := qcache.NewManager(cl, cache)
 	reconciler := NewCohortReconciler(cl, cache, qManager)
 
 	cohort := utiltestingapi.MakeCohort("cohort").Obj()
@@ -78,7 +75,7 @@ func TestCohortReconcileCohortNotFoundIdempotentDelete(t *testing.T) {
 		Build()
 	ctx, _ := utiltesting.ContextWithLog(t)
 	cache := schdcache.New(cl)
-	qManager := qcache.NewManagerForUnitTests(cl, cache)
+	qManager := qcache.NewManager(cl, cache)
 	reconciler := NewCohortReconciler(cl, cache, qManager)
 
 	snapshot, err := cache.Snapshot(ctx)
@@ -115,7 +112,7 @@ func TestCohortReconcileCycleNoError(t *testing.T) {
 		Build()
 	ctx, _ := utiltesting.ContextWithLog(t)
 	cache := schdcache.New(cl)
-	qManager := qcache.NewManagerForUnitTests(cl, cache)
+	qManager := qcache.NewManager(cl, cache)
 	reconciler := NewCohortReconciler(cl, cache, qManager)
 
 	// no cycle when creating first cohort
@@ -160,7 +157,7 @@ func TestCohortReconcileErrorOtherThanNotFoundNotDeleted(t *testing.T) {
 	cl := utiltesting.NewClientBuilder().WithInterceptorFuncs(funcs).Build()
 
 	cache := schdcache.New(cl)
-	qManager := qcache.NewManagerForUnitTests(cl, cache)
+	qManager := qcache.NewManager(cl, cache)
 	reconciler := NewCohortReconciler(cl, cache, qManager)
 	cohort := utiltestingapi.MakeCohort("cohort").Obj()
 	_ = cache.AddOrUpdateCohort(cohort)
@@ -196,9 +193,8 @@ func TestCohortReconcileLifecycle(t *testing.T) {
 	).Obj()
 	cl := utiltesting.NewClientBuilder().WithObjects(cohort).WithStatusSubresource(&kueue.Cohort{}).Build()
 	cache := schdcache.New(cl)
-	qManager := qcache.NewManagerForUnitTests(cl, cache)
+	qManager := qcache.NewManager(cl, cache)
 	reconciler := NewCohortReconciler(cl, cache, qManager)
-	labels := map[string]string{"cohort": cohort.Name, "flavor": "red", "resource": "cpu", "replica_role": "standalone"}
 
 	// create
 	{
@@ -224,15 +220,6 @@ func TestCohortReconcileLifecycle(t *testing.T) {
 		if diff := cmp.Diff(wantQuotas, cohortSnap.ResourceNode.SubtreeQuota); diff != "" {
 			t.Fatalf("unexpected quota (-want +got) %s", diff)
 		}
-
-		cnq := testingmetrics.CollectFilteredGaugeVec(metrics.CohortSubtreeQuota, labels)
-		if cnq == nil {
-			t.Fatal("expected metric value")
-		}
-		wantCNQ := []testingmetrics.MetricDataPoint{
-			{Labels: labels, Value: 10_000},
-		}
-		checkMetricDataPoints(t, cnq, wantCNQ)
 	}
 
 	// update
@@ -268,15 +255,6 @@ func TestCohortReconcileLifecycle(t *testing.T) {
 		if diff := cmp.Diff(wantQuotas, cohortSnap.ResourceNode.SubtreeQuota); diff != "" {
 			t.Fatalf("unexpected quota (-want +got) %s", diff)
 		}
-
-		cnq := testingmetrics.CollectFilteredGaugeVec(metrics.CohortSubtreeQuota, labels)
-		if cnq == nil {
-			t.Fatal("expected metric value")
-		}
-		wantCNQ := []testingmetrics.MetricDataPoint{
-			{Labels: labels, Value: 5_000},
-		}
-		checkMetricDataPoints(t, cnq, wantCNQ)
 	}
 
 	// delete
@@ -298,19 +276,6 @@ func TestCohortReconcileLifecycle(t *testing.T) {
 		if cohortSnap := snapshot.Cohort("cohort"); cohortSnap != nil {
 			t.Fatal("unexpected Cohort in snapshot")
 		}
-
-		cnq := testingmetrics.CollectFilteredGaugeVec(metrics.CohortSubtreeQuota, labels)
-		if cnq == nil {
-			t.Fatal("expected metric value")
-		}
-		wantCNQ := []testingmetrics.MetricDataPoint{}
-		checkMetricDataPoints(t, cnq, wantCNQ)
-	}
-}
-
-func checkMetricDataPoints(t *testing.T, got, want []testingmetrics.MetricDataPoint) {
-	if diff := cmp.Diff(want, got, cmpopts.SortSlices(func(a, b testingmetrics.MetricDataPoint) bool { return a.Less(&b) })); diff != "" {
-		t.Fatalf("unexpected metrics (-want +got) %s", diff)
 	}
 }
 
@@ -318,7 +283,7 @@ func TestCohortReconcilerFilters(t *testing.T) {
 	cl := utiltesting.NewClientBuilder().
 		Build()
 	cache := schdcache.New(cl)
-	qManager := qcache.NewManagerForUnitTests(cl, cache)
+	qManager := qcache.NewManager(cl, cache)
 	reconciler := NewCohortReconciler(cl, cache, qManager)
 
 	t.Run("delete returns true", func(t *testing.T) {

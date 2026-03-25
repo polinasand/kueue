@@ -501,7 +501,6 @@ func (p *Pod) Stop(ctx context.Context, c client.Client, _ []podset.PodSetInfo, 
 				},
 			},
 		}
-		//nolint:staticcheck //SA1019: client.Apply is deprecated
 		if err := c.Status().Patch(ctx, pCopy, client.Apply, client.FieldOwner(constants.KueueName)); err != nil && !apierrors.IsNotFound(err) {
 			return stoppedNow, err
 		}
@@ -559,8 +558,10 @@ func (p *Pod) Finalize(ctx context.Context, c client.Client) error {
 	}
 
 	return parallelize.Until(ctx, len(podsInGroup.Items), func(i int) error {
-		_, err := removePodFinalizers(ctx, c, &podsInGroup.Items[i])
-		return err
+		pod := &podsInGroup.Items[i]
+		return clientutil.Patch(ctx, c, pod, func() (bool, error) {
+			return controllerutil.RemoveFinalizer(pod, podconstants.PodFinalizer), nil
+		}, clientutil.WithLoose())
 	})
 }
 
@@ -912,24 +913,6 @@ func sortActivePods(activePods []corev1.Pod) {
 	})
 }
 
-func removePodFinalizers(ctx context.Context, c client.Client, pod *corev1.Pod) (bool, error) {
-	var removed bool
-	patchOptions := make([]clientutil.PatchOption, 0, 1)
-
-	if features.Enabled(features.RemoveFinalizersWithStrictPatch) {
-		patchOptions = append(patchOptions, clientutil.WithRetryOnConflict())
-	} else {
-		patchOptions = append(patchOptions, clientutil.WithLoose())
-	}
-
-	err := clientutil.Patch(ctx, c, pod, func() (bool, error) {
-		removed = controllerutil.RemoveFinalizer(pod, podconstants.PodFinalizer)
-		return removed, nil
-	}, patchOptions...)
-
-	return removed, err
-}
-
 func (p *Pod) removeExcessPods(ctx context.Context, c client.Client, r record.EventRecorder, extraPods []corev1.Pod) error {
 	if len(extraPods) == 0 {
 		return nil
@@ -943,26 +926,26 @@ func (p *Pod) removeExcessPods(ctx context.Context, c client.Client, r record.Ev
 
 	// Finalize and delete the active pods created last
 	err := parallelize.Until(ctx, len(extraPods), func(i int) error {
-		pod := &extraPods[i]
-
-		removed, err := removePodFinalizers(ctx, c, pod)
-		if err != nil {
+		pod := extraPods[i]
+		if err := clientutil.Patch(ctx, c, &pod, func() (bool, error) {
+			removed := controllerutil.RemoveFinalizer(&pod, podconstants.PodFinalizer)
+			if removed {
+				log.V(3).Info("Finalizing excess pod in group", "excessPod", klog.KObj(&pod))
+			}
+			return removed, nil
+		}, clientutil.WithLoose()); err != nil {
 			// We won't observe this cleanup in the event handler.
 			p.excessPodExpectations.ObservedUID(log, p.key, pod.UID)
 			return err
 		}
-		if removed {
-			log.V(3).Info("Finalized excess pod in group", "excessPod", klog.KObj(pod))
-		}
-
 		if pod.DeletionTimestamp.IsZero() {
-			log.V(3).Info("Deleting excess pod in group", "excessPod", klog.KObj(pod))
-			if err := c.Delete(ctx, pod); err != nil {
+			log.V(3).Info("Deleting excess pod in group", "excessPod", klog.KObj(&pod))
+			if err := c.Delete(ctx, &pod); err != nil {
 				// We won't observe this cleanup in the event handler.
 				p.excessPodExpectations.ObservedUID(log, p.key, pod.UID)
 				return err
 			}
-			r.Event(pod, corev1.EventTypeNormal, ReasonExcessPodDeleted, "Excess pod deleted")
+			r.Event(&pod, corev1.EventTypeNormal, ReasonExcessPodDeleted, "Excess pod deleted")
 		}
 		return nil
 	})
@@ -984,15 +967,23 @@ func (p *Pod) finalizePods(ctx context.Context, c client.Client, extraPods []cor
 	p.excessPodExpectations.ExpectUIDs(log, p.key, extraPodsUIDs)
 
 	err := parallelize.Until(ctx, len(extraPods), func(i int) error {
-		pod := &extraPods[i]
-
-		removed, err := removePodFinalizers(ctx, c, pod)
-		if err != nil || !removed {
+		pod := extraPods[i]
+		var removed bool
+		if err := clientutil.Patch(ctx, c, &pod, func() (bool, error) {
+			removed = controllerutil.RemoveFinalizer(&pod, podconstants.PodFinalizer)
+			if removed {
+				log.V(3).Info("Finalizing pod in group", "Pod", klog.KObj(&pod))
+			}
+			return removed, nil
+		}, clientutil.WithLoose()); err != nil {
 			// We won't observe this cleanup in the event handler.
 			p.excessPodExpectations.ObservedUID(log, p.key, pod.UID)
 			return err
 		}
-		log.V(3).Info("Finalized pod in group", "pod", klog.KObj(pod))
+		if !removed {
+			// We don't expect an event in this case.
+			p.excessPodExpectations.ObservedUID(log, p.key, pod.UID)
+		}
 		return nil
 	})
 	if err != nil {
@@ -1412,10 +1403,6 @@ func GetWorkloadNameForPod(podName string, podUID types.UID) string {
 func NewGroupWorkload(name string, obj client.Object, podSets []kueue.PodSet, labelKeysToCopy []string) *kueue.Workload {
 	wl := jobframework.NewWorkload(name, obj, podSets, labelKeysToCopy)
 	wl.Annotations[podconstants.IsGroupWorkloadAnnotationKey] = podconstants.IsGroupWorkloadAnnotationValue
-
-	if features.Enabled(features.AdmissionGatedBy) {
-		jobframework.PropagateAdmissionGatedByAnnotation(obj, wl)
-	}
 
 	return wl
 }
