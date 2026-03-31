@@ -109,7 +109,7 @@ func (b *multiKueueAdapter) SyncJob(ctx context.Context, localClient client.Clie
 		remoteJob.Spec.Template.Labels = map[string]string{}
 	}
 
-	remoteJob.Spec.Template.Labels[kueue.MultiKueueWorkerWorkloadLabel] = "true"
+	remoteJob.Spec.Template.Labels[kueue.ManagedByMultiKueueLabelKey] = kueue.ManagedByMultiKueueLabelValue
 
 	return remoteClient.Create(ctx, &remoteJob)
 }

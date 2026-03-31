@@ -36,7 +36,9 @@ const (
 	// admission check controller.
 	MultiKueueControllerName = "kueue.x-k8s.io/multikueue"
 
-	MultiKueueWorkerWorkloadLabel = "kueue.x-k8s.io/multikueue-worker-workload"
+	ManagedByMultiKueueLabelKey = "kueue.x-k8s.io/multikueue"
+
+	ManagedByMultiKueueLabelValue = "true"
 )
 
 type LocationType string
