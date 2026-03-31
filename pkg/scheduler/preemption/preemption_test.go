@@ -4134,7 +4134,7 @@ func TestPreemption(t *testing.T) {
 					t.Fatalf("Failed adding kueue scheme: %v", err)
 				}
 				recorder := broadcaster.NewRecorder(scheme, corev1.EventSource{Component: constants.AdmissionName})
-				preemptor := New(cl, workload.Ordering{}, recorder, nil, false, clocktesting.NewFakeClock(now), nil, nil, preemptexpectations.New(), nil)
+				preemptor := New(cl, workload.Ordering{}, recorder, nil, false, clocktesting.NewFakeClock(now), nil, preemptexpectations.New(), nil)
 
 				beforeSnapshot, err := cqCache.Snapshot(ctx)
 				if err != nil {
@@ -4356,7 +4356,7 @@ func TestPreemptionWhenWorkloadModifiedConcurrently(t *testing.T) {
 					t.Fatalf("Failed adding kueue scheme: %v", err)
 				}
 				recorder := broadcaster.NewRecorder(scheme, corev1.EventSource{Component: constants.AdmissionName})
-				preemptor := New(cl, workload.Ordering{}, recorder, nil, false, clocktesting.NewFakeClock(now), nil, nil, preemptexpectations.New(), nil)
+				preemptor := New(cl, workload.Ordering{}, recorder, nil, false, clocktesting.NewFakeClock(now), nil, preemptexpectations.New(), nil)
 
 				beforeSnapshot, err := cqCache.Snapshot(ctx)
 				if err != nil {
@@ -4481,7 +4481,7 @@ func TestIssuePreemptionsSkipsDuplicate(t *testing.T) {
 					t.Fatalf("Failed adding kueue scheme: %v", err)
 				}
 				recorder := broadcaster.NewRecorder(scheme, corev1.EventSource{Component: constants.AdmissionName})
-				preemptor := New(cl, workload.Ordering{}, recorder, nil, false, clocktesting.NewFakeClock(now), nil, nil, store, nil)
+				preemptor := New(cl, workload.Ordering{}, recorder, nil, false, clocktesting.NewFakeClock(now), nil, store, nil)
 
 				snapshot, err := cqCache.Snapshot(ctx)
 				if err != nil {
@@ -4677,9 +4677,7 @@ func TestCandidatesOrdering(t *testing.T) {
 
 	_, log := utiltesting.ContextWithLog(t)
 	for _, tc := range cases {
-		for fg, enable := range tc.featureGates {
-			features.SetFeatureGateDuringTest(t, fg, enable)
-		}
+		features.SetFeatureGatesDuringTest(t, tc.featureGates)
 		slices.SortFunc(tc.candidates, func(a, b workload.Info) int {
 			return preemptioncommon.CandidatesOrdering(log, tc.featureGates != nil && tc.featureGates[features.AdmissionFairSharing], &a, &b, kueue.ClusterQueueReference(preemptorCq), now)
 		})
@@ -4831,9 +4829,7 @@ func TestPriorityInfo(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for fg, enable := range tc.featureGates {
-				features.SetFeatureGateDuringTest(t, fg, enable)
-			}
+			features.SetFeatureGatesDuringTest(t, tc.featureGates)
 			_, log := utiltesting.ContextWithLog(t)
 			gotEff, gotBase, gotBoost := priorityInfo(log, tc.wl)
 			if gotEff != tc.wantEffective || gotBase != tc.wantBase || gotBoost != tc.wantBoost {

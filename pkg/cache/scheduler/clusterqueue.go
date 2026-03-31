@@ -494,6 +494,9 @@ func (c *clusterQueue) deleteWorkload(log logr.Logger, wlKey workload.Reference)
 }
 
 func (c *clusterQueue) reportActiveWorkloads() {
+	for ancestor := range c.Parent().PathSelfToRoot() {
+		metrics.ReportCohortSubtreeAdmittedActiveWorkloads(ancestor.Name, ancestor.admittedWorkloadsCount, c.customMetricLabelValues, c.roleTracker)
+	}
 	metrics.ReportAdmittedActiveWorkloads(c.Name, c.admittedWorkloadsCount, c.customMetricLabelValues, c.roleTracker)
 	metrics.ReportReservingActiveWorkloads(c.Name, len(c.Workloads), c.customMetricLabelValues, c.roleTracker)
 }
@@ -548,6 +551,7 @@ func (c *clusterQueue) updateWorkloadUsage(log logr.Logger, wi *workload.Info, o
 	c.updateWorkloadTASUsage(log, wi, op)
 	if admitted {
 		updateFlavorUsage(frUsage, c.AdmittedUsage, op)
+		c.Parent().updateAdmittedWorkloadsCount(op.asSignedOne())
 		c.admittedWorkloadsCount += op.asSignedOne()
 	}
 	qKey := queue.KeyFromWorkload(wi.Obj)
@@ -558,7 +562,7 @@ func (c *clusterQueue) updateWorkloadUsage(log logr.Logger, wi *workload.Info, o
 			lq.updateAdmittedUsage(frUsage, op)
 			lq.admittedWorkloads += op.asSignedOne()
 		}
-		if c.lqMetrics.ShouldExposeLocalQueueMetrics(lq.labels) {
+		if lq.shouldExposeMetrics(c.lqMetrics) {
 			lq.reportActiveWorkloads(c.roleTracker)
 		}
 	}
@@ -629,7 +633,7 @@ func (c *clusterQueue) addLocalQueue(q *kueue.LocalQueue, customLabelValues []st
 
 func (c *clusterQueue) deleteLocalQueue(q *kueue.LocalQueue) {
 	qKey := queueKey(q)
-	if features.Enabled(features.LocalQueueMetrics) {
+	if c.lqMetrics.IsEnabled() {
 		namespace, lqName := queue.MustParseLocalQueueReference(qKey)
 		metrics.ClearLocalQueueCacheMetrics(metrics.LocalQueueReference{
 			Name:      lqName,

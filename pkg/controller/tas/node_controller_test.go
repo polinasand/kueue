@@ -893,9 +893,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 	for name, tc := range tests {
 		fakeClock.SetTime(testStartTime)
 		t.Run(name, func(t *testing.T) {
-			for fg, enable := range tc.featureGates {
-				features.SetFeatureGateDuringTest(t, fg, enable)
-			}
+			features.SetFeatureGatesDuringTest(t, tc.featureGates)
 			fakeClock.SetTime(testStartTime)
 
 			clientBuilder := utiltesting.NewClientBuilder().
@@ -913,7 +911,7 @@ func TestNodeFailureReconciler(t *testing.T) {
 			}
 			cl := clientBuilder.Build()
 			recorder := &utiltesting.EventRecorder{}
-			r := newNodeReconciler(cl, recorder, schdcache.New(cl), nil, nil)
+			r := newNodeReconciler(cl, recorder, schdcache.New(cl), nil)
 			r.clock = fakeClock
 
 			var result reconcile.Result
@@ -1080,9 +1078,7 @@ func TestGetWorkloadStatus(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			for fg, enable := range tc.featureGates {
-				features.SetFeatureGateDuringTest(t, fg, enable)
-			}
+			features.SetFeatureGatesDuringTest(t, tc.featureGates)
 			clientBuilder := utiltesting.NewClientBuilder().WithObjects(tc.initObjs...)
 			ctx, _ := utiltesting.ContextWithLog(t)
 			if err := indexer.SetupIndexes(ctx, utiltesting.AsIndexer(clientBuilder)); err != nil {
@@ -1093,7 +1089,7 @@ func TestGetWorkloadStatus(t *testing.T) {
 			}
 			cl := clientBuilder.Build()
 
-			reconciler := newNodeReconciler(cl, &utiltesting.EventRecorder{}, nil, nil, nil)
+			reconciler := newNodeReconciler(cl, &utiltesting.EventRecorder{}, nil, nil)
 			wl := &kueue.Workload{}
 			_ = cl.Get(ctx, wlKey, wl)
 
