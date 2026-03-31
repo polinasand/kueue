@@ -69,6 +69,11 @@ var _ = ginkgo.AfterSuite(func() {
 	fwk.Teardown()
 })
 
+var _ = ginkgo.ReportAfterSuite("Generate JUnit Report", func(report ginkgo.Report) {
+	err := util.ConfigureSuiteReporting(report)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+})
+
 func managerSetup(opts ...jobframework.Option) framework.ManagerSetup {
 	return func(ctx context.Context, mgr manager.Manager) {
 		reconciler, err := job.NewReconciler(
@@ -107,12 +112,17 @@ func managerAndControllersSetup(
 		lqMetrics := metrics.NewLocalQueueMetricsConfig(configuration.Metrics.LocalQueueMetrics)
 
 		cCache := schdcache.New(mgr.GetClient(), schdcache.WithLocalQueueMetrics(lqMetrics))
-		queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache, qcache.WithLocalQueueMetrics(lqMetrics))
+		preemptionExpectations := preemptexpectations.New()
+		queueOptions := []qcache.Option{
+			qcache.WithPreemptionExpectations(preemptionExpectations),
+			qcache.WithLocalQueueMetrics(lqMetrics),
+		}
+		queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache, queueOptions...)
 
-		opts = append(opts, jobframework.WithCache(cCache), jobframework.WithLocalQueueMetrics(lqMetrics))
+		opts = append(opts, jobframework.WithCache(cCache))
 		managerSetup(opts...)(ctx, mgr)
 
-		failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil, preemptexpectations.New(), nil)
+		failedCtrl, err := core.SetupControllers(mgr, queues, cCache, configuration, nil, preemptionExpectations, nil)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred(), "controller", failedCtrl)
 
 		if setupTASControllers {
@@ -125,7 +135,7 @@ func managerAndControllersSetup(
 
 		if enableScheduler {
 			sched := scheduler.New(queues, cCache, mgr.GetClient(), mgr.GetEventRecorderFor(constants.AdmissionName),
-				scheduler.WithPreemptionExpectations(preemptexpectations.New()), scheduler.WithLocalQueueMetrics(lqMetrics))
+				scheduler.WithPreemptionExpectations(preemptionExpectations))
 			err = sched.Start(ctx)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		}

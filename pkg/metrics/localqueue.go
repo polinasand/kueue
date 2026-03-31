@@ -17,20 +17,12 @@ limitations under the License.
 package metrics
 
 import (
-	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/klog/v2"
 
 	configapi "sigs.k8s.io/kueue/apis/config/v1beta2"
-	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	"sigs.k8s.io/kueue/pkg/features"
-	utilqueue "sigs.k8s.io/kueue/pkg/util/queue"
 )
-
-type LocalQueueLabelStorage interface {
-	GetLocalQueueLabels(cqName kueue.ClusterQueueReference, lqKey utilqueue.LocalQueueReference) (map[string]string, error)
-}
 
 type LocalQueueMetricsConfig struct {
 	Enabled       bool
@@ -63,24 +55,14 @@ func NewLocalQueueMetricsConfig(cfg *configapi.LocalQueueMetrics) *LocalQueueMet
 	return lqMetricsConfig
 }
 
+// IsEnabled reports whether LocalQueue metric reporting is enabled or not,
+// regardless of label configuration.
+func (cfg *LocalQueueMetricsConfig) IsEnabled() bool {
+	return features.Enabled(features.LocalQueueMetrics) && (cfg == nil || cfg.Enabled)
+}
+
 // ShouldExposeLocalQueueMetrics determines if a specific LocalQueue should report metrics
 // based on the global configuration.
 func (cfg *LocalQueueMetricsConfig) ShouldExposeLocalQueueMetrics(lqLabels map[string]string) bool {
-	if cfg == nil {
-		return true
-	}
-	return features.Enabled(features.LocalQueueMetrics) && cfg.Enabled && cfg.QueueSelector.Matches(labels.Set(lqLabels))
-}
-
-func (cfg *LocalQueueMetricsConfig) ShouldExposeLocalQueueMetricsForWorkload(log logr.Logger, lqLabelStorage LocalQueueLabelStorage, wl *kueue.Workload) bool {
-	if wl.Status.Admission == nil {
-		log.V(5).Info("WARNING: cannot expose local queue metrics of workload without status.Admission", "workload", wl)
-		return false
-	}
-	lqLabels, err := lqLabelStorage.GetLocalQueueLabels(wl.Status.Admission.ClusterQueue, utilqueue.NewLocalQueueReference(wl.Namespace, wl.Spec.QueueName))
-	if err != nil {
-		log.V(5).Error(err, "Failed to get LocalQueue for metrics", "localQueue", klog.KRef(wl.Namespace, string(wl.Spec.QueueName)))
-		return false
-	}
-	return cfg.ShouldExposeLocalQueueMetrics(lqLabels)
+	return cfg.IsEnabled() && (cfg == nil || cfg.QueueSelector.Matches(labels.Set(lqLabels)))
 }

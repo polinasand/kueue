@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 
@@ -99,7 +100,6 @@ type JobReconciler struct {
 	workloadRetentionPolicy      WorkloadRetentionPolicy
 	roleTracker                  *roletracker.RoleTracker
 	customLabels                 *metrics.CustomLabels
-	lqMetrics                    *metrics.LocalQueueMetricsConfig
 }
 
 // RoleTracker returns the role tracker for HA logging.
@@ -124,7 +124,6 @@ type Options struct {
 	RoleTracker                  *roletracker.RoleTracker
 	CustomLabels                 *metrics.CustomLabels
 	NoopWebhook                  bool
-	LqMetrics                    *metrics.LocalQueueMetricsConfig
 }
 
 // Option configures the reconciler.
@@ -254,13 +253,6 @@ func WithNoopWebhook(noop bool) Option {
 	}
 }
 
-// WithLocalQueueMetrics sets the configuration for local queue metrics.
-func WithLocalQueueMetrics(value *metrics.LocalQueueMetricsConfig) Option {
-	return func(o *Options) {
-		o.LqMetrics = value
-	}
-}
-
 var defaultOptions = Options{
 	Clock: clock.RealClock{},
 }
@@ -283,7 +275,6 @@ func NewReconciler(
 		workloadRetentionPolicy:      options.WorkloadRetentionPolicy,
 		roleTracker:                  options.RoleTracker,
 		customLabels:                 options.CustomLabels,
-		lqMetrics:                    options.LqMetrics,
 	}
 }
 
@@ -572,7 +563,7 @@ func (r *JobReconciler) ReconcileGenericJob(ctx context.Context, req ctrl.Reques
 				admittedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueue.WorkloadAdmitted)
 				admittedUntilReadyWaitTime := condition.LastTransitionTime.Sub(admittedCond.LastTransitionTime.Time)
 				metrics.ReportAdmittedUntilReadyWaitTime(cqName, priorityClassName, admittedUntilReadyWaitTime, r.customLabels.CQGet(cqName), r.roleTracker)
-				if r.lqMetrics.ShouldExposeLocalQueueMetricsForWorkload(log, r.cache, wl) {
+				if r.cache.ShouldExposeLocalQueueMetricsForWorkload(log, wl) {
 					lqRef := metrics.LQRefFromWorkload(wl)
 					lqCustomLabels := r.customLabels.LQGet(utilqueue.KeyFromWorkload(wl))
 					metrics.LocalQueueReadyWaitTime(lqRef, priorityClassName, queuedUntilReadyWaitTime, lqCustomLabels, r.roleTracker)
@@ -1370,7 +1361,13 @@ func (r *JobReconciler) constructWorkload(ctx context.Context, job GenericJob) (
 func newWorkloadName(job GenericJob) string {
 	object := job.Object()
 	if WorkloadSliceEnabled(job) {
-		return GetWorkloadNameForOwnerWithGVKAndGeneration(object.GetName(), object.GetUID(), job.GVK(), object.GetGeneration())
+		extra := ""
+		if elasticWorkloadNameProvider, ok := job.(ElasticWorkloadNameProvider); ok {
+			extra = elasticWorkloadNameProvider.GetWorkloadNameExtraPart()
+		} else {
+			extra = strconv.FormatInt(object.GetGeneration(), 10)
+		}
+		return GenerateWorkloadNameWithExtra(object.GetName(), object.GetUID(), job.GVK(), extra)
 	}
 	return GetWorkloadNameForOwnerWithGVK(object.GetName(), object.GetUID(), job.GVK())
 }

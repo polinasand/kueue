@@ -70,6 +70,11 @@ var _ = ginkgo.AfterSuite(func() {
 	fwk.Teardown()
 })
 
+var _ = ginkgo.ReportAfterSuite("Generate JUnit Report", func(report ginkgo.Report) {
+	err := util.ConfigureSuiteReporting(report)
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+})
+
 type managerSetupOpts struct {
 	runScheduler bool
 	roleTracker  *roletracker.RoleTracker
@@ -129,16 +134,17 @@ func managerAndControllerSetup(controllersCfg *config.Configuration, options ...
 			schdcache.WithLocalQueueMetrics(lqMetrics),
 			schdcache.WithCustomLabels(customLabels),
 		}
+		preemptionExpectations := preemptexpectations.New()
 		queueOpts := []qcache.Option{
 			qcache.WithRoleTracker(opts.roleTracker),
 			qcache.WithLocalQueueMetrics(lqMetrics),
 			qcache.WithCustomLabels(customLabels),
+			qcache.WithPreemptionExpectations(preemptionExpectations),
 		}
 
 		cCache := schdcache.New(mgr.GetClient(), cacheOpts...)
 		queues := util.NewManagerForIntegrationTests(ctx, mgr.GetClient(), cCache, queueOpts...)
 
-		preemptionExpectations := preemptexpectations.New()
 		failedCtrl, err := core.SetupControllers(mgr, queues, cCache, controllersCfg, opts.roleTracker, preemptionExpectations, customLabels)
 		gomega.Expect(err).ToNot(gomega.HaveOccurred(), "controller", failedCtrl)
 
@@ -151,7 +157,7 @@ func managerAndControllerSetup(controllersCfg *config.Configuration, options ...
 		}
 
 		if opts.runScheduler {
-			sched := scheduler.New(queues, cCache, mgr.GetClient(), mgr.GetEventRecorderFor(constants.AdmissionName), scheduler.WithPreemptionExpectations(preemptionExpectations), scheduler.WithCustomLabels(customLabels), scheduler.WithLocalQueueMetrics(lqMetrics))
+			sched := scheduler.New(queues, cCache, mgr.GetClient(), mgr.GetEventRecorderFor(constants.AdmissionName), scheduler.WithPreemptionExpectations(preemptionExpectations), scheduler.WithCustomLabels(customLabels))
 			err = sched.Start(ctx)
 			gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		}
