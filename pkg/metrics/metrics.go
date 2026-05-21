@@ -484,6 +484,16 @@ The label 'reason' can have the following values:
 		}, []string{"cluster_queue", "replica_role"},
 	)
 
+	// +metricsdoc:group=clusterqueue
+	// +metricsdoc:labels=cluster_queue="the name of the ClusterQueue",replica_role="one of `leader`, `follower`, or `standalone`",flavor="the resource flavor name"
+	AdmittedActiveWorkloadsPerFlavor = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: constants.KueueName,
+			Name:      "admitted_active_workloads_per_flavor",
+			Help:      "The number of admitted Workloads that are active (unsuspended and not finished), per 'cluster_queue' and 'flavor'",
+		}, []string{"cluster_queue", "replica_role", "flavor"},
+	)
+
 	// +metricsdoc:group=localqueue
 	// +metricsdoc:labels=name="the name of the LocalQueue",namespace="the namespace of the LocalQueue",replica_role="one of `leader`, `follower`, or `standalone`"
 	LocalQueueAdmittedActiveWorkloads = prometheus.NewGaugeVec(
@@ -956,6 +966,7 @@ func Register() {
 		PendingWorkloads,
 		ReservingActiveWorkloads,
 		AdmittedActiveWorkloads,
+		AdmittedActiveWorkloadsPerFlavor,
 		FinishedWorkloads,
 		ClusterQueueResourceUsage,
 		ClusterQueueByStatus,

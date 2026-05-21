@@ -498,6 +498,9 @@ func (c *clusterQueue) reportActiveWorkloads() {
 	role := roletracker.GetRole(c.roleTracker)
 	metrics.AdmittedActiveWorkloads.WithLabelValues(string(c.Name), role).Set(float64(c.admittedWorkloadsCount))
 	metrics.ReservingActiveWorkloads.WithLabelValues(string(c.Name), role).Set(float64(len(c.Workloads)))
+	for fr, q := range c.AdmittedUsage {
+		metrics.AdmittedActiveWorkloadsPerFlavor.WithLabelValues(string(c.Name), role, fr.String()).Set(float64(q))
+	}
 }
 
 func (c *clusterQueue) reportResourceMetrics(fairSharingEnabled bool) {
@@ -519,6 +522,7 @@ func (c *clusterQueue) reportResourceMetrics(fairSharingEnabled bool) {
 		metrics.ReportClusterQueueQuotas(cohort, cqName, fName, rName, nominal, borrowing, lending, c.roleTracker)
 		metrics.ReportClusterQueueResourceReservations(cohort, cqName, fName, rName, resourceFloat(fr.Resource, c.resourceNode.Usage[fr]), c.roleTracker)
 		metrics.ReportClusterQueueResourceUsage(cohort, cqName, fName, rName, resourceFloat(fr.Resource, c.AdmittedUsage[fr]), c.roleTracker)
+		metrics.AdmittedActiveWorkloadsPerFlavor.WithLabelValues(string(c.Name), roletracker.GetRole(c.roleTracker), fr.String()).Set(float64(c.AdmittedUsage[fr]))
 	}
 	if fairSharingEnabled {
 		c.reportWeightedShare(cohort)
